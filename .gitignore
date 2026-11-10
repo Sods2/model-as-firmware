@@ -1,0 +1,6 @@
+pico-scratch/
+build/
+
+# training
+train/.venv/
+train/BitNetMCU/

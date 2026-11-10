@@ -74,6 +74,12 @@ Repo layout follows HANDOFF §10: `train/ compiler/ firmware/rp2350/ firmware/ba
 - Owned: one Pico 2 with headers, USB meter, cable. No Debug Probe.
 - Code repo = `Projects/model-as-firmware`
 
+## Progress (10 Nov 2026)
+- **Steps 0–2 done.** The board enumerates as an RP2350 and is flashed with `picotool load -f -x`, so BOOTSEL is no longer needed after the first flash. `firmware/rp2350/hello/` prints over USB (COM3). The DWT cycle counter reads 150,251 cycles for a 1 ms wait at 150 MHz, and the timing loop varies by ±108 cycles out of 700k.
+  - Two of the micro-USB cables on hand are **charge-only**, and with them the Pico doesn't show up at all.
+- **Step 2b blocked.** The power meter is USB-C, so it needs an adapter or a USB-C cable before it can go in line.
+- **Step 3 done.** See `train/README.md`. The ternary CNN80 reaches 99.48% best and 99.45% final, against 99.52% reported by BitNetMCU. The 70% and 90% fc1-zero variants are trained and reach 99.44% and 99.50% final, so sparsity costs no accuracy. Headers are in `train/export/` and weights in `train/models/`. In this model only fc1 is ternary; the convolutions are 8-bit and fc2/fc3 are 4-bit.
+
 ## 3. Open items
 - Exact Pi 4 RAM and whether you have a microSD card and power supply for it. This only matters for Setup B or the later Pi phase.
 - One Pico is enough until idea F, which needs 3.
