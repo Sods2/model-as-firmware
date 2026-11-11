@@ -60,7 +60,7 @@ int main(void) {
             gpio_put(PICO_DEFAULT_LED_PIN, (++n >> 6) & 1);  // slow blink while busy
         } else if (cmd == 'T') {
             printf("T");
-            for (int i = 0; i < REF_N_STAGES; i++) printf(" %s=%lu", ref_stage_names[i], (unsigned long)ref_stage_cycles[i]);
+            for (int i = 0; i < ref_n_stages; i++) printf(" %s=%lu", ref_stage_names[i], (unsigned long)ref_stage_cycles[i]);
             printf("\n");
         }
         // anything else (stray newlines etc.) is ignored

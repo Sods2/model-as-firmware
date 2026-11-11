@@ -22,7 +22,7 @@ About 24 s per epoch on an RTX 3060 Ti, so a 60-epoch run takes about 25 min. Ex
 ## Configs
 | Config | fc1 zeros | Notes |
 |---|---|---|
-| `ternary_cnn80.yaml` | 24.8% (natural) | BitNetMCU's "80-wide ternary" run; they report 99.52% |
+| `ternary_cnn80.yaml` | 50.2% (natural, BitNet absmean rule) | BitNetMCU's "80-wide ternary" run; they report 99.52% |
 | `ternary_cnn80_z70.yaml` | 70% (forced) | sparse-storage variant |
 | `ternary_cnn80_z90.yaml` | 90% (forced) | sparse-storage variant |
 
@@ -42,7 +42,7 @@ git -C BitNetMCU apply ../bitnetmcu.patch
 ## Results
 | Model | fc1 zeros | Best test acc | Final test acc | Quantized (integer) acc |
 |---|---|---|---|---|
-| tern80 | 24.8% | 99.48% (ep 52) | 99.45% | 99.47% |
+| tern80 | 50.2% | 99.48% (ep 52) | 99.45% | 99.47% |
 | tern80z70 | 70.0% | 99.55% (ep 58) | 99.44% | 99.45% |
 | tern80z90 | 90.0% | 99.54% (ep 59) | 99.50% | 99.49% |
 

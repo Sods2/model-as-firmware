@@ -1,0 +1,5 @@
+date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct,latency_ms_mean,cycles_mean,cycles_min,cycles_max,sys_mhz,flash_kb,ram_kb,flash_read_kb,energy_mj,notes
+2026-11-11 13:57,mafc_v0,tern80,pico,10000,99.47,100.0,99.98,9.33,1399449,1392655,1500143,150,46.43,7.23,,,
+2026-11-11 14:00,mafc_v0_ram,tern80,pico,10000,99.47,100.0,99.98,8.832,1324761,1324668,1325194,150,46.32,53.55,,,
+2026-11-11 14:02,mafc_v0,tern80z70,pico,10000,99.47,100.0,99.97,9.281,1392081,1385172,1490633,150,46.44,7.23,,,
+2026-11-11 14:05,mafc_v0,tern80z90,pico,10000,99.51,100.0,99.98,9.223,1383520,1377650,1480398,150,46.44,7.23,,,

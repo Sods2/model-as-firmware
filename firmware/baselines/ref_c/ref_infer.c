@@ -135,8 +135,9 @@ static void fc_4bitsym(const int8_t *in, const uint32_t *w, int n_in, int n_out,
     }
 }
 
-const char *const ref_stage_names[REF_N_STAGES] = {"conv1", "dw1", "pool1", "dw2", "pool2", "fc1", "fc2", "fc3"};
-uint32_t ref_stage_cycles[REF_N_STAGES];
+const int ref_n_stages = 8;
+const char *const ref_stage_names[REF_MAX_STAGES] = {"conv1", "dw1", "pool1", "dw2", "pool2", "fc1", "fc2", "fc3"};
+uint32_t ref_stage_cycles[REF_MAX_STAGES];
 
 // Static buffers: the Pico's default stack is small.
 static int32_t buf_a[16 * 16], buf_b[16 * 16];

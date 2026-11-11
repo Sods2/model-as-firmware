@@ -2,6 +2,16 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 11 Nov 2026: Phase 1, compiler v0 (`compiler/mafc`, branch `phase1-compiler-v0`)
+
+- Built the compiler pipeline: a front end that reads the exported header, an IR with exact integer semantics, a numpy interpreter, and an RP2350 C back end. The back end emits one function per layer with constant sizes, packed weights as data, static buffers, and channel fusion. See [compiler.md](compiler.md) and [compiler/README.md](../compiler/README.md).
+- Correctness chain, all bit-exact on 10k images for tern80, z70 and z90: interpreter == golden, generated C on the PC == golden, generated C on the Pico == golden. Our own ternary packer round-trips.
+- Timed (10k images, `results/phase1.csv`): **9.33 ms from flash, 8.83 ms from SRAM** for tern80. The hand-written ref_c took 10.21 and 9.52 ms, so this is 1.09x and 1.08x faster. Against the CMSIS-NN bar (14.52 ms from SRAM) it's **1.64x faster**. z70: 9.28 ms; z90: 9.22 ms.
+- Profile: conv1 is 34% faster (reads the int8 image directly) and dw1 is 12% slower (gcc code generation for constant loops). fc layers are unchanged.
+- Bound analysis: conv1 outputs are provably ≤ 3,448, so dw1 can use SMLAD on int16 exactly. dw1 and dw2 outputs aren't provably int16.
+- Correction: the base tern80 fc1 is **50.2%** zeros, not 24.8% (fixed in `train/README.md`).
+- Added `harness/measure.sh` (any list of build:model:mem specs); flashing now retries up to 5 times.
+
 ## 11 Nov 2026: live execution view (`harness/bridge.py`, `ui/live.html`)
 
 - Added a browser view of a run. It shows the pipeline with per-stage cycle shares, feature maps for each layer, FC1's ternary weights, and logits against the golden model. It also has slow-mo and replay modes and pauses with a red banner on any golden mismatch.

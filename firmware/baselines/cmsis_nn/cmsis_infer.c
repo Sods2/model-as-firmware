@@ -49,8 +49,9 @@ static const cmsis_nn_dims pool2_idim = {1, 4, 4, C};
 static const cmsis_nn_dims pool2_odim = {1, 2, 2, C};
 static const cmsis_nn_dims no_bias    = {0, 0, 0, 0};
 
-const char *const ref_stage_names[REF_N_STAGES] = {"conv1", "dw1", "pool1", "dw2", "pool2", "fc1", "fc2", "fc3"};
-uint32_t ref_stage_cycles[REF_N_STAGES];
+const int ref_n_stages = 8;
+const char *const ref_stage_names[REF_MAX_STAGES] = {"conv1", "dw1", "pool1", "dw2", "pool2", "fc1", "fc2", "fc3"};
+uint32_t ref_stage_cycles[REF_MAX_STAGES];
 
 static int initialized;
 int cmsis_check_scratch(void);

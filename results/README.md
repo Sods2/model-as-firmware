@@ -34,3 +34,16 @@ All builds are bit-exact with their golden models on all 10,000 test images.
 - **Flash vs SRAM:** CMSIS-NN loses 29% running from flash, because its int8 weights overflow the 16 KB XIP cache. ref_c loses 7%.
 - **Sparsity:** 70% and 90% zeros in fc1 speed ref_c up by only 0.5–1%, because the packed format still decodes every trit. Gains will need a sparse format in the compiler.
 - Latency jitter is under 0.1% from SRAM. From flash the max is about 6% above the mean (cache misses).
+
+## Phase 1: compiler v0 (`phase1.csv`, 11 Nov 2026)
+
+The mafc-generated C. Same integer arithmetic, bit-exact with the golden model on all 10,000 images.
+
+| Build | Model | Accuracy | Latency | vs ref_c | vs CMSIS-NN (same memory) | Flash | RAM |
+|---|---|---|---|---|---|---|---|
+| mafc_v0 (flash) | tern80 | 99.47% | 9.33 ms | 1.09x | 2.00x | 46.4 KB | 7.2 KB |
+| mafc_v0 (SRAM) | tern80 | 99.47% | **8.83 ms** | 1.08x | **1.64x** | 46.3 KB | 53.6 KB |
+| mafc_v0 (flash) | tern80z70 | 99.47% | 9.28 ms | 1.09x | n/a | 46.4 KB | 7.2 KB |
+| mafc_v0 (flash) | tern80z90 | 99.51% | 9.22 ms | 1.10x | n/a | 46.4 KB | 7.2 KB |
+
+Stage profiles are in `profile_stages.csv` (`mafc_v0_prof`, `mafc_v0_ram_prof` rows); analysis in [notes/compiler.md](../notes/compiler.md).

@@ -8,6 +8,7 @@ Sends MNIST test images to a target, checks the outputs bit for bit against a go
 | `run.py` | Runs one target (`golden`, `host` = the C reference built for the PC, `pico` = the board over USB serial). Compares with the golden model, the PyTorch model and the labels, and appends a row to `results/phase0.csv` |
 | `export_cmsis.py` | Calibrates and writes the CMSIS-NN int8 model header |
 | `phase0_matrix.sh` | Builds, flashes and measures every Phase 0 configuration (`profile` or `final`) |
+| `measure.sh` | Builds, flashes and measures any list of `build:model:mem` specs (`ref_c`, `cmsis_nn`, `mafc`), e.g. `harness/measure.sh final results/phase1.csv mafc:tern80:flash` |
 | `bridge.py` | Live view: runs a target image by image and streams each result, the per-stage cycles and the golden model's layer outputs to [`ui/live.html`](../ui/live.html) in the browser |
 
 ## Typical use (Git Bash, from the repo root)

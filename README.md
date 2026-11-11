@@ -16,7 +16,7 @@ Feasible as a proof of concept, but expect a solid improvement over a standard e
 
 ## Status
 
-*As of 11 Nov 2026.* Phase 0 steps 0–6 are done. Gate 0 is met on correctness and baselines; only the energy measurement (step 2b) is left.
+*As of 11 Nov 2026.* Phase 0 steps 0–6 are done. Gate 0 is met on correctness and baselines; only the energy measurement (step 2b) is left. **Phase 1 has started:** compiler v0 ([compiler/](compiler/README.md)) generates bit-exact firmware that runs at 8.83 ms from SRAM, 1.64x faster than the CMSIS-NN bar.
 
 - **Gate 0 results ([results/](results/README.md)):** the plain-C reference on the Pico 2 is bit-exact with its golden model on all 10,000 test images: 99.47% accuracy, 10.21 ms per image (9.52 ms from SRAM). The CMSIS-NN int8 baseline with the same weights gets 99.44% at 18.70 ms (14.52 ms from SRAM). 14.52 ms is the speed bar for Gate 1.
 - **Hardware:** one Pico 2 with headers, a micro-USB data cable, a USB power meter and a Pi 4. A Debug Probe and a USB-C cable for the meter are on order. Until they arrive, flashing and the test link both go over the Pico's own USB.
@@ -33,6 +33,7 @@ Feasible as a proof of concept, but expect a solid improvement over a standard e
 | [train/README.md](train/README.md) | How to reproduce the ternary MNIST training, local BitNetMCU patches, results |
 | [firmware/baselines/](firmware/baselines/README.md) | Plain-C reference and CMSIS-NN builds, build options |
 | [harness/](harness/README.md) | PC test harness, golden models, CMSIS-NN exporter, live execution view (`bridge.py` + [ui/live.html](ui/live.html)) |
+| [compiler/](compiler/README.md) | mafc: the model-as-firmware compiler (front end, IR, interpreter, RP2350 C back end) |
 | [results/](results/README.md) | Measured numbers |
 | [notes/](notes/README.md) | Research notes, how-tos and the dated lab log |
 | [FEASIBILITY-STUDY.md](FEASIBILITY-STUDY.md) | Prior art, verification findings, architecture, ideas A–H to test, risks, sources |
