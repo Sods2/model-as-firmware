@@ -28,10 +28,15 @@ flowchart LR
 | Area | Status |
 | --- | --- |
 | Research and feasibility | ✅ Done (feasibility study, prior art, verification, ideas A–H) |
-| Docs in repo | ✅ `model-as-firmware/` in a private repo |
-| Hardware | ⏳ Shopping list ready; ordering not confirmed. The Pi model you already own is still to be checked (likely a Pi 4) |
-| Code | ❌ Nothing written yet; no code repo yet |
-| Baselines | ❌ BitNetMCU and Atome LM not yet reproduced |
+| Docs in repo | ✅ This repo (`Projects/model-as-firmware`), which holds both docs and code |
+| Hardware | ✅ On hand: one Pico 2 with headers, a micro-USB data cable, a USB power meter (USB-C plug) and a Pi 4. ⏳ The rest of the shopping list (Debug Probe, extra Picos, breadboard, wires) isn't ordered; nothing more is needed until Gate 0 |
+| Pico bring-up | ✅ Builds, flashes with `picotool load -f -x`, prints over USB serial (COM3). The cycle counter reads 150,251 cycles for 1 ms at 150 MHz, ±108 cycles of jitter over 700k |
+| Energy measurement | ⛔ Blocked: the meter needs a USB-C adapter or cable |
+| BitNetMCU baseline | ✅ Reproduced: ternary CNN80 at 99.45% final / 99.48% best (99.52% reported). The 70% and 90% fc1-zero variants reach 99.44% and 99.50%. See `train/README.md` |
+| Plain-C reference, CMSIS-NN baseline, harness | ❌ Not started (Phase 0 steps 4–6) |
+| Atome LM baseline | ❌ Not reproduced (Phase 3) |
+
+*Status updated 10 Nov 2026. The step-by-step log is in [GETTING-STARTED.md](GETTING-STARTED.md).*
 
 ## 4. Decisions already made
 
@@ -128,9 +133,9 @@ flowchart LR
 
 ## 9. Open questions for the next session
 
-1. Which Raspberry Pi do you already own (Pi 4? how much RAM)?
-2. Has the shopping list been ordered? (Items 1–6 are needed; 7–8 only if you lack them.)
-3. Where should the code live: a new repo such as `Sods2/model-as-firmware`, or a `code/` folder in this one? The suggestion is a new repo, keeping `Ideas` for docs.
+1. ~~Which Raspberry Pi do you already own?~~ **Answered:** a Pi 4. Still open: how much RAM it has, and whether you have a microSD card and power supply for it.
+2. ~~Has the shopping list been ordered?~~ **Answered:** no. One Pico 2, a data cable and the power meter are on hand, which is enough up to Gate 0. The Debug Probe and the extra Picos can wait.
+3. ~~Where should the code live?~~ **Answered:** in this repo, `Projects/model-as-firmware`.
 4. Which language model to use for Phase 3: Atome LM's model, or a TinyStories-sized ternary model trained from scratch?
 
 ## 10. Suggested code repo layout
