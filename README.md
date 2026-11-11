@@ -14,6 +14,44 @@ flowchart LR
 
 Feasible as a proof of concept, but expect a solid improvement over a standard embedded runtime on small models, not a Taalas-style 70x. The gain comes only from removing software overhead and memory traffic. The compiler is the lasting asset, since one front end can serve several back ends.
 
+## How it works
+
+```mermaid
+flowchart TB
+  subgraph PC["On the PC"]
+    direction TB
+    T["train/: BitNetMCU training<br/>ternary MNIST CNN"] --> H["Exported model header<br/>train/export/*.h"]
+    H --> FE["Compiler front end<br/>compiler/mafc"]
+    FE --> IR["IR: conv, pool, relu_norm, linear, argmax"]
+    IR --> I["IR interpreter (numpy)"]
+    IR --> BD["bounds.py<br/>proves value ranges (int16 where safe)"]
+    BD --> BE["RP2350 back end<br/>2 cores, SMLAD, branch-free ReLU"]
+    BE --> GEN["Generated C<br/>firmware/rp2350/mafc/gen/"]
+    GEN --> SDK["Pico SDK build + picotool flash"]
+    G["Golden model<br/>harness/golden.py (exact integer numpy)"]
+    I -. "must match" .-> G
+    R["harness/run.py, measure.sh<br/>send images, check, time"]
+    R --> CSV["results/*.csv, notes/FINDINGS.md"]
+    G -. "expected logits" .-> R
+  end
+
+  subgraph BOARD["On the Pico 2 (bare metal, no OS)"]
+    direction LR
+    C0["Core 0<br/>half the channels, then fc layers, argmax"]
+    C1["Core 1<br/>other half (job loop on SIO FIFO)"]
+    MEM["Weights as const arrays<br/>flash (XIP cache) or SRAM"]
+    MEM --> C0
+    MEM --> C1
+    C1 -- "join" --> C0
+  end
+
+  SDK -- "firmware = the model" --> BOARD
+  R -- "image over USB serial" --> C0
+  C0 -- "prediction, logits, cycle count" --> R
+```
+
+One inference: conv1 → dw1 → pool1 → dw2 → pool2 (run per channel, split across the two cores) → relu_norm → fc1 (ternary) → fc2 → fc3 → argmax. Every build has to match the golden model bit for bit on all 10,000 test images before its timing counts.
+
 ## Status
 
 *As of 11 Nov 2026.* Phase 0 steps 0–6 are done. Gate 0 is met on correctness and baselines; only the energy measurement (step 2b) is left. **Phase 1 has started:** the compiler ([compiler/](compiler/README.md)) generates bit-exact firmware. v0 (one core) runs at 8.18 ms from SRAM; v1 with both cores, SMLAD and branch-free ReLUs runs at **4.23 ms, 3.4x faster than the CMSIS-NN bar** (14.52 ms).
