@@ -60,6 +60,11 @@ PT=~/.pico-sdk/picotool/2.3.1/picotool/picotool.exe
 - The RP2040 had XIP cache counters (`XIP_CTR_HIT`, `XIP_CTR_ACC`). The **RP2350 register headers in SDK 2.3.1 have none** (checked 11 Nov 2026), so the `flash_read_kb` metric can't simply be read from a counter.
 - Options still to check: work out bytes read from the weight layout and the 16 KB cache (analytically); the QMI or bus-performance counters in the RP2350 datasheet; or compare the same build with `RUN_FROM_RAM` on and off, as the CMSIS-NN fc1 experiment already did (524k vs 71k cycles).
 
+## Gotcha: `arm-none-eabi-size` counts code in SRAM as text
+
+- Functions placed in SRAM with `__not_in_flash_func` / `__time_critical_func` land in `.data`, which is an executable section. Berkeley-format `size` therefore reports them as **text** and `data` as 0, even though they occupy SRAM at run time (found 11 Nov 2026: an 86 KB fc1 showed up as 9.7 KB of RAM).
+- Use `arm-none-eabi-size -A` and sum the sections at `0x20000000`–`0x2007FFFF` (main SRAM; the stacks are in the scratch banks above). `harness/run.py` does this since 11 Nov 2026.
+
 ## Gotcha: only one thing can use the board, and Git Bash `ps` doesn't see Windows processes
 
 - COM3 can only be opened by one process. A second `run.py` (or the live-view `bridge.py`) fails with `could not open port 'COM3': PermissionError(13, 'Access is denied.')`.

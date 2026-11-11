@@ -19,3 +19,13 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-11 18:34,mafc_v0_simd_ram,tern80,pico,10000,99.47,100.0,99.98,7.439,1115885,1115799,1116324,150,48.48,57.72,,,branch-free ReLU
 2026-11-11 18:36,mafc_v1_dual_simd,tern80,pico,10000,99.47,100.0,99.98,5.402,810357,801545,910641,150,50.93,10.78,,,branch-free ReLU
 2026-11-11 18:38,mafc_v1_dual_simd_ram,tern80,pico,10000,99.47,100.0,99.98,4.227,634008,633947,634225,150,50.82,61.6,,,branch-free ReLU
+2026-11-11 20:12,mafc_v0_simd,tern80,pico,10000,99.47,100.0,99.98,5.969,895340,888718,981017,150,49.62,9.74,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:14,mafc_v0_simd_ram,tern80,pico,10000,99.47,100.0,99.98,5.228,784138,783982,784510,150,49.51,59.25,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:16,mafc_v1_dual_simd,tern80,pico,10000,99.47,100.0,99.98,4.375,656244,648232,754714,150,51.7,11.28,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:18,mafc_v1_dual_simd_ram,tern80,pico,10000,99.47,100.0,99.98,3.053,457956,457845,458140,150,51.58,62.86,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:54,mafc_v1_dual_simd_code_ram,tern80,pico,10000,99.47,100.0,99.98,2.322,348359,348303,348556,150,128.63,133.36,,,"fc1 as code (idea A), in SRAM"
+2026-11-11 20:56,mafc_v1_dual_simd_code,tern80,pico,10000,99.47,100.0,99.98,2.888,433170,428624,520324,150,128.75,97.45,,,"fc1 as code (idea A), in SRAM"
+2026-11-11 20:58,mafc_v0_simd_code_ram,tern80,pico,10000,99.47,100.0,99.98,3.873,580889,580797,581317,150,132.49,135.69,,,"fc1 as code (idea A), in SRAM"
+2026-11-11 21:00,mafc_v0_simd_code,tern80,pico,10000,99.47,100.0,99.98,4.107,615996,612313,689275,150,132.61,101.47,,,"fc1 as code (idea A), in SRAM"
+2026-11-11 21:01,mafc_v1_dual_simd_code_ram,tern80z70,pico,10000,99.47,100.0,99.97,2.264,339604,339494,340064,150,87.71,92.44,,,"fc1 as code (idea A), in SRAM"
+2026-11-11 21:03,mafc_v1_dual_simd_code_ram,tern80z90,pico,10000,99.51,100.0,99.98,2.209,331374,331253,331488,150,59.75,64.49,,,"fc1 as code (idea A), in SRAM"

@@ -117,13 +117,25 @@ def run_pico(port, img8, stages_out=None):
     return rows, meta
 
 
+SRAM_LO, SRAM_HI = 0x20000000, 0x20080000     # main SRAM; the scratch banks above it hold only the stacks
+
+
 def elf_sizes(elf, in_ram=False):
-    """(flash KB, RAM KB) from arm-none-eabi-size: flash = text + data, RAM = data + bss
-    (+ text for copy_to_ram builds, where code and constants are copied to SRAM at boot).
-    The RAM figure excludes stack and heap."""
+    """(flash KB, RAM KB). Flash = text + data from arm-none-eabi-size (everything stored in flash).
+    RAM = the sizes of all sections linked at main-SRAM addresses (size -A), excluding the heap and the
+    stacks. This counts code copied to SRAM at boot (copy_to_ram builds, and functions placed in
+    .time_critical.* in flash builds), which Berkeley `size` reports as text.
+    (Until 11 Nov 2026 RAM was data + bss (+ text for copy_to_ram builds); see results/README.md.)
+    in_ram is unused, kept for callers."""
     out = subprocess.run([str(SIZE_TOOL), str(elf)], capture_output=True, text=True, check=True).stdout
     text, data, bss = (int(v) for v in out.splitlines()[1].split()[:3])
-    return round((text + data) / 1024, 2), round((data + bss + (text if in_ram else 0)) / 1024, 2)
+    out_a = subprocess.run([str(SIZE_TOOL), '-A', str(elf)], capture_output=True, text=True, check=True).stdout
+    ram = 0
+    for line in out_a.splitlines():
+        f = line.split()
+        if len(f) == 3 and f[1].isdigit() and f[2].isdigit() and SRAM_LO <= int(f[2]) < SRAM_HI and f[0] != '.heap':
+            ram += int(f[1])
+    return round((text + data) / 1024, 2), round(ram / 1024, 2)
 
 
 def main():

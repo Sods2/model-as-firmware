@@ -23,6 +23,9 @@ def main():
     ap.add_argument('--out', default=str(ROOT / 'firmware' / 'rp2350' / 'mafc' / 'gen'))
     ap.add_argument('--cores', type=int, default=1, choices=[1, 2], help='2 = split work across both M33 cores')
     ap.add_argument('--simd', action='store_true', help='int16 planes where bounds prove it, SMLAD depthwise convs')
+    ap.add_argument('--ternary', default='base3', choices=backend_rp2350_c.TERNARY_FORMATS,
+                    help='format of ternary linear layers: base3 (10 trits/uint16, decode loop), sparse (index lists), '
+                         'code (weights compiled into instructions, idea A), dense (int8 + SXTB16/SMLAD, needs --simd)')
     ap.add_argument('--check', type=int, default=1000, help='test images to check IR vs golden (0 = skip)')
     args = ap.parse_args()
 
@@ -38,7 +41,7 @@ def main():
         print(f'IR interpreter == golden on {args.check} images: {ok}')
         if not ok:
             sys.exit(1)
-    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd)
+    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd, ternary=args.ternary)
     print(f'wrote {path.relative_to(ROOT)}')
 
 

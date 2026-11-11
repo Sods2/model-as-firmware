@@ -124,64 +124,107 @@ static inline void {node.name}_ch(const {in_ctype} *restrict in, {out_ctype} *re
 
 
 def pack_smlad_kernel(k):
-    """[C, 3, 3] int8 -> [C, 6] uint32: per kernel row r, (k[r][1] << 16) | (k[r][0] & 0xFFFF), then k[r][2] (low half)."""
+    """[C, 3, 3] int8 -> [C, 6] uint32: per kernel row r the halfword pairs A_r = (k[r][0], k[r][1]) and
+    B_r = (k[r][1], k[r][2]) (first element in the low half): A_0, A_1, A_2, B_0, B_1, B_2."""
     k = k.astype(np.int64)
-    pairs = ((k[:, :, 1] & 0xFFFF) << 16) | (k[:, :, 0] & 0xFFFF)
-    singles = k[:, :, 2] & 0xFFFF
-    return np.concatenate([pairs, singles], axis=1)
+    a = ((k[:, :, 1] & 0xFFFF) << 16) | (k[:, :, 0] & 0xFFFF)
+    b = ((k[:, :, 2] & 0xFFFF) << 16) | (k[:, :, 1] & 0xFFFF)
+    return np.concatenate([a, b], axis=1)
 
 
 def emit_conv_ch_smlad(node, out_ctype):
-    """One channel of a depthwise 3x3 conv on an int16 plane, two outputs per step with SMLAD.
-    For outputs x and x+1 of one kernel row r (inputs i0..i3 = in[x..x+3]):
-      s0 += k0*i0 + k1*i1  (SMLAD on the word (i0, i1))   + k2*i2  (SMLABB, low half of (i2, i3))
-      s1 += k0*i1 + k1*i2  (SMLAD on the repacked (i1, i2)) + k2*i3  (SMLATB, high half of (i2, i3))
-    Exact: the inputs are proven to fit int16 and the partial sums int32 (bounds.py)."""
+    """One channel of a 3x3 conv on an int16 plane, two outputs per step with SMLAD.
+    For outputs x and x+1 of one kernel row r (inputs i0..i3 = in[x..x+3], words p = (i0, i1), q = (i2, i3),
+    kernel words A = (k0, k1), B = (k1, k2)):
+      s0 += i0*k0 + i1*k1  (SMLAD p, A)    + i2*k2          (SMLABT q, B)
+      s1 += i1*k0          (SMLATB p, A)   + i2*k1 + i3*k2  (SMLAD q, B)
+    4 MACs and 2 loads per row, no repacking. Row 0 starts the sums with SMUAD (no zero register).
+    Exact: the inputs are proven to fit int16 and the partial sums int32 (bounds.py).
+    ReLU + shift is one USAT: s < 0 gives 0, and the upper clamp is never reached (output range proven).
+    An int16 output pair is stored as one word: both values are in [0, 2^15), so v0 | v1 << 16 is exactly the
+    two int16s side by side (little-endian).
+    The x loop is kept rolled (`#pragma GCC unroll 1`): unrolled, gcc hoists the loads and spills to the stack."""
     n = node.in_shape[1]
     m = n - 2
     sh = node.attrs['shift']
     assert n % 2 == 0 and m % 2 == 0, 'SMLAD kernel needs an even plane width (aligned word pairs)'
     rows = []
     for r in range(3):
+        s0 = f'SMUAD(p, a{r})' if r == 0 else f'SMLAD(p, a{r}, s0)'
+        s1 = f'SMUAD(q, b{r})' if r == 0 else f'SMLAD(q, b{r}, s1)'
         rows.append(f'''            {{
                 uint32_t p, q;
-                memcpy(&p, in + (y + {r}) * {n} + x, 4);
-                memcpy(&q, in + (y + {r}) * {n} + x + 2, 4);
-                s0 = SMLAD(p, kp[{r}], s0);
-                s0 = SMLABB(q, kp[{3 + r}], s0);
-                s1 = SMLAD((p >> 16) | (q << 16), kp[{r}], s1);
-                s1 = SMLATB(q, kp[{3 + r}], s1);
+                memcpy(&p, row + {r * n} + x, 4);
+                memcpy(&q, row + {r * n} + x + 2, 4);
+                s0 = {s0};
+                s0 = SMLABT(q, b{r}, s0);
+                s1 = {s1};
+                s1 = SMLATB(p, a{r}, s1);
             }}''')
     body = '\n'.join(rows)
-    return f'''// {node.name}: conv3x3 (depthwise), one channel, int16 {n}x{n} -> {m}x{m}, ReLU, >> {sh}; SMLAD, 2 outputs per step
+    bits = 15 if out_ctype == 'int16_t' else 31
+    v0, v1 = f'USAT(s0 >> {sh}, {bits})', f'USAT(s1 >> {sh}, {bits})'
+    if out_ctype == 'int16_t':
+        store = (f"            uint32_t w = (uint32_t){v0} | ((uint32_t){v1} << 16);\n"
+                 f"            memcpy(o + x, &w, 4);")
+    else:
+        store = (f"            o[x] = ({out_ctype}){v0};\n"
+                 f"            o[x + 1] = ({out_ctype}){v1};")
+    return f'''// {node.name}: conv3x3 ({node.attrs['mode']}), one channel, int16 {n}x{n} -> {m}x{m}, ReLU, >> {sh}; SMLAD, 2 outputs per step
 static inline void {node.name}_ch(const int16_t *restrict in, const uint32_t *restrict kp, {out_ctype} *restrict out) {{
+    const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];
     for (int y = 0; y < {m}; y++) {{
+        const int16_t *row = in + y * {n};
         {out_ctype} *o = out + y * {m};
+        #pragma GCC unroll 1
         for (int x = 0; x < {m}; x += 2) {{
-            int32_t s0 = 0, s1 = 0;
+            int32_t s0, s1;
 {body}
-            o[x] = {relu_shift('s0', sh, out_ctype)};
-            o[x + 1] = {relu_shift('s1', sh, out_ctype)};
+{store}
         }}
     }}
 }}
 '''
 
 
+IMG16_DECL = '''static int16_t img16[REF_IMG_PIXELS] __attribute__((aligned(4)));   // the image widened to int16, read by conv1's SMLAD kernel
+'''
+
+WIDEN_IMG = '''
+// The image widened to int16 once per inference: conv1 is a broadcast conv, so every output channel reads
+// the same plane and the SMLAD kernel needs (int16, int16) word pairs.
+static inline void widen_img(const int8_t *restrict img) {
+    for (int i = 0; i < REF_IMG_PIXELS; i++) img16[i] = img[i];
+}
+'''
+
 SIMD_HELPERS = '''
-// ---- DSP helpers: SMLAD/SMLABB/SMLATB on the M33, plain C on the PC (same results) ----
+// ---- DSP helpers: SMLAD/SMUAD/SMLABT/SMLATB/USAT/SXTB16 on the M33, plain C on the PC (same results) ----
 #include <string.h>
 #if defined(__ARM_FEATURE_DSP) && __ARM_FEATURE_DSP
 #include <arm_acle.h>
 #define SMLAD(a, b, acc)  __smlad((a), (b), (acc))
-#define SMLABB(a, b, acc) __smlabb((int32_t)(a), (int32_t)(b), (acc))
+#define SMUAD(a, b)       __smuad((a), (b))
+#define SMLABT(a, b, acc) __smlabt((int32_t)(a), (int32_t)(b), (acc))
 #define SMLATB(a, b, acc) __smlatb((int32_t)(a), (int32_t)(b), (acc))
+#define USAT(x, bits)     __usat((x), (bits))
+#define SXTB16(x)         __sxtb16(x)
+#define SXTB16_ROR8(x)    __sxtb16(__ror((x), 8))
 #else
+static inline uint32_t SXTB16(uint32_t x) {
+    return ((uint32_t)(uint16_t)(int16_t)(int8_t)x) | ((uint32_t)(uint16_t)(int16_t)(int8_t)(x >> 16) << 16);
+}
+static inline uint32_t SXTB16_ROR8(uint32_t x) { return SXTB16((x >> 8) | (x << 24)); }
 static inline int32_t SMLAD(uint32_t a, uint32_t b, int32_t acc) {
     return acc + (int16_t)a * (int16_t)b + (int16_t)(a >> 16) * (int16_t)(b >> 16);
 }
-static inline int32_t SMLABB(uint32_t a, uint32_t b, int32_t acc) { return acc + (int16_t)a * (int16_t)b; }
+static inline int32_t SMUAD(uint32_t a, uint32_t b) { return SMLAD(a, b, 0); }
+static inline int32_t SMLABT(uint32_t a, uint32_t b, int32_t acc) { return acc + (int16_t)a * (int16_t)(b >> 16); }
 static inline int32_t SMLATB(uint32_t a, uint32_t b, int32_t acc) { return acc + (int16_t)(a >> 16) * (int16_t)b; }
+static inline int32_t USAT(int32_t x, int bits) {
+    const int32_t hi = (int32_t)((1u << bits) - 1);
+    return x < 0 ? 0 : x > hi ? hi : x;
+}
 #endif
 '''
 
@@ -302,7 +345,110 @@ def channel_fused_prefix(nodes):
 PAR_MIN_MACS = 4096   # linear layers smaller than this stay on core 0 (the handshake would cost more)
 
 
-def generate(graph, source='', cores=1, simd=False):
+TERNARY_FORMATS = ('base3', 'sparse', 'code', 'dense')
+
+
+def emit_ternary(node, fmt, rows):
+    """A ternary linear layer in one of the alternative formats (base3 is emit_linear). Returns
+    (weights C text, function C text, C statement to run before the call or None, extra globals C text).
+    Every function takes (in, out, o0, o1) when rows is True, else (in, out).
+      sparse: per row, the input indices of the +1 weights then the -1 weights (uint16), summed with a loop.
+      code:   idea A, the weights compiled into the instructions: one straight-line sum per row.
+      dense:  int8 trits, 4 per word, unpacked with SXTB16 and multiplied with SMLAD against an int16 copy
+              of the input (widened once, before the call)."""
+    w = node.weights
+    n_out, n_in = w.shape
+    nm = node.name
+    sig = '(const int8_t *restrict in, int32_t *restrict out, int o0, int o1)' if rows else \
+          '(const int8_t *restrict in, int32_t *restrict out)'
+    lo, hi = ('o0', 'o1') if rows else ('0', str(n_out))
+    nnz = int(np.count_nonzero(w))
+    if fmt == 'sparse':
+        idx, start, mid = [], [], []
+        for o in range(n_out):
+            start.append(len(idx))
+            idx += list(np.nonzero(w[o] == 1)[0])
+            mid.append(len(idx))
+            idx += list(np.nonzero(w[o] == -1)[0])
+        start.append(len(idx))
+        assert len(idx) == nnz and max(idx) < 2**16 and len(idx) < 2**16
+        data = (c_array('uint16_t', f'{nm}_ix', idx, '{}', 16) + c_array('uint16_t', f'{nm}_start', start, '{}', 16) +
+                c_array('uint16_t', f'{nm}_mid', mid, '{}', 16))
+        fn = f'''// {nm}: linear {n_in} -> {n_out}, ternary as sparse index lists ({nnz} nonzeros: +1 indices, then -1 indices, per row)
+static inline void {nm}{sig} {{
+    for (int o = {lo}; o < {hi}; o++) {{
+        const uint16_t *p = {nm}_ix + {nm}_start[o], *m = {nm}_ix + {nm}_mid[o], *e = {nm}_ix + {nm}_start[o + 1];
+        int32_t s = 0;
+        #pragma GCC unroll 4
+        while (p < m) s += in[*p++];
+        #pragma GCC unroll 4
+        while (p < e) s -= in[*p++];
+        out[o] = s;
+    }}
+}}
+'''
+        return data, fn, None, ''
+    if fmt == 'code':
+        lines = []
+        for o in range(n_out):
+            terms = [f'+ in[{i}]' for i in np.nonzero(w[o] == 1)[0]] + [f'- in[{i}]' for i in np.nonzero(w[o] == -1)[0]]
+            expr = ' '.join(terms).lstrip('+ ') if terms else '0'
+            text, line = [], ''          # wrap at about 110 columns, between tokens
+            for tok in expr.split(' '):
+                if len(line) + len(tok) > 110:
+                    text.append(line)
+                    line = ''
+                line += (' ' if line else '') + tok
+            text.append(line)
+            body = ('\n' + ' ' * 12).join(text)
+            guard = f'if ({o} >= o0 && {o} < o1) ' if rows else ''
+            lines.append(f'    {guard}out[{o}] =\n            {body};')
+        # The function always lives in SRAM (copied at boot, also in flash builds): run from flash, its ~90 KB of
+        # straight-line code streams through the 16 KB XIP cache and is 12x slower than from SRAM (F16).
+        fn = f'''// {nm}: linear {n_in} -> {n_out}, ternary weights compiled into code (idea A): {nnz} nonzeros, one load and one add/sub each
+#if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
+#include "pico.h"
+#define MAFC_IN_SRAM(f) __not_in_flash_func(f)   // section .time_critical.<f>, copied to SRAM at boot
+#else
+#define MAFC_IN_SRAM(f) f
+#endif
+__attribute__((noinline)) static void MAFC_IN_SRAM({nm}){sig} {{
+''' + '\n'.join(lines) + '\n}\n'
+        return '', fn, None, ''
+    if fmt == 'dense':
+        assert n_in % 4 == 0, 'dense ternary needs n_in % 4 == 0'
+        b = w.astype(np.int64).reshape(n_out, n_in // 4, 4) & 0xFF
+        # bytes [w0, w2, w1, w3]: SXTB16(word) = (w0, w1), SXTB16(word ror 8) = (w2, w3)
+        words = (b[:, :, 0] | (b[:, :, 2] << 8) | (b[:, :, 1] << 16) | (b[:, :, 3] << 24)).reshape(-1)
+        k = n_in // 4
+        data = c_array('uint32_t', f'{nm}_w', words, '0x{:08X}', 8)
+        glob = f'static int16_t {nm}_a16[{n_in}] __attribute__((aligned(4)));   // {nm} input widened to int16\n'
+        fn = f'''// {nm}: linear {n_in} -> {n_out}, ternary as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input
+static inline void {nm}_widen(const int8_t *restrict in) {{
+    for (int i = 0; i < {n_in}; i++) {nm}_a16[i] = in[i];
+}}
+static inline void {nm}{sig} {{
+    (void)in;
+    const uint32_t *w = {nm}_w + {lo} * {k};
+    for (int o = {lo}; o < {hi}; o++) {{
+        const int16_t *a = {nm}_a16;
+        int32_t s = 0;
+        for (int j = 0; j < {k}; j++) {{
+            uint32_t ww = *w++, a01, a23;
+            memcpy(&a01, a + 4 * j, 4);
+            memcpy(&a23, a + 4 * j + 2, 4);
+            s = SMLAD(SXTB16(ww), a01, s);
+            s = SMLAD(SXTB16_ROR8(ww), a23, s);
+        }}
+        out[o] = s;
+    }}
+}}
+'''
+        return data, fn, f'{nm}_widen', glob
+    raise ValueError(fmt)
+
+
+def generate(graph, source='', cores=1, simd=False, ternary='base3'):
     """cores=2: the channel-fused conv segment and the big linear layers are split across both M33 cores.
     Core 1 runs a job loop fed by the SIO FIFO; on the PC build the core-1 jobs simply run inline first."""
     assert cores in (1, 2)
@@ -338,13 +484,18 @@ def generate(graph, source='', cores=1, simd=False):
         if nd.op == 'maxpool2':
             out_t = in_t if not last else 'int32_t'
         kern = 'plain'
-        if (simd and nd.op == 'conv3x3' and nd.attrs['mode'] == 'depthwise' and in_t == 'int16_t'
-                and nd.in_shape[1] % 2 == 0 and (nd.in_shape[1] - 2) % 2 == 0):
+        even = nd.in_shape[1] % 2 == 0 and (nd.in_shape[1] - 2) % 2 == 0
+        if simd and nd.op == 'conv3x3' and even and (
+                (nd.attrs['mode'] == 'depthwise' and in_t == 'int16_t') or
+                (nd.attrs['mode'] == 'broadcast' and in_t == 'int8_t')):
+            # broadcast: the int8 image is widened to int16 once per inference (img16), then every
+            # output channel runs the same SMLAD kernel on it
             assert bd[nd.name][2] <= 2**31 - 1
             kern = 'smlad'
         plan.append((nd, in_t, out_t, kern))
         in_t = out_t
     uses16 = any(o == 'int16_t' for _, _, o, _ in plan)
+    img16 = plan[0][3] == 'smlad'       # conv1 reads a widened int16 copy of the image
 
     weights, funcs = [], []
     for nd, it, ot, kern in plan:
@@ -358,11 +509,20 @@ def generate(graph, source='', cores=1, simd=False):
                              emit_conv_ch(nd, 'int8_t' if nd.attrs['mode'] == 'broadcast' else 'int32_t'))
         else:
             funcs.append(emit_pool_ch(nd, it, ot) if simd else emit_pool_ch(nd))
+    assert ternary in TERNARY_FORMATS
+    assert ternary != 'dense' or simd, 'the dense ternary format uses SXTB16/SMLAD: needs --simd'
+    pre_call, extra_globals = {}, ''
     for nd in rest:
         if nd.op == 'relu_norm':
             funcs.append(emit_relu_norm(nd))
         elif nd.op == 'linear':
-            d, f = emit_linear(nd, rows=nd.name in par_linear)
+            if nd.attrs['quant'] == 'ternary' and ternary != 'base3':
+                d, f, pre, glob = emit_ternary(nd, ternary, rows=nd.name in par_linear)
+                if pre:
+                    pre_call[nd.name] = pre
+                extra_globals += glob
+            else:
+                d, f = emit_linear(nd, rows=nd.name in par_linear)
             weights.append(d)
             funcs.append(f)
 
@@ -371,7 +531,7 @@ def generate(graph, source='', cores=1, simd=False):
     def seg_loop(lo, hi, pa, pb, prof, indent='    ', p16=None):
         """p16: names of the two int16 planes for this core (needed when the plan uses int16)."""
         out = [f'{indent}for (int c = {lo}; c < {hi}; c++) {{']
-        cur = 'img'
+        cur = 'img16' if img16 else 'img'
         pools = {'int32_t': [pa, pb], 'int16_t': p16 or []}
         used_planes.update(b for b in [pa, pb] + (p16 or []))
         for j, (nd, it, ot, kern) in enumerate(plan):
@@ -396,6 +556,8 @@ def generate(graph, source='', cores=1, simd=False):
     dual = ''
     job_of = {}
     body = ['    PROF_BEGIN();']
+    if img16:
+        body.append('    widen_img(img);   // counted in the conv1 stage')
     used_planes, used_dst = set(), set()
     p16_0 = ['ch16_a', 'ch16_b'] if uses16 else None
     p16_1 = ['ch1_16_a', 'ch1_16_b'] if uses16 else None
@@ -404,7 +566,7 @@ def generate(graph, source='', cores=1, simd=False):
     else:
         # core-1 jobs: 1 = its half of the conv segment (channels 0..half), 2.. = the upper half of the rows
         # of each parallel linear layer
-        jobs = ['        case 1: {', '            const int8_t *img = job_img;'] + \
+        jobs = ['        case 1: {'] + ([] if img16 else ['            const int8_t *img = job_img;']) + \
                seg_loop(0, half, 'ch1_a', 'ch1_b', False, '            ', p16=p16_1) + ['            break;', '        }']
         for nd in rest:
             if nd.name in par_linear:
@@ -417,8 +579,7 @@ def generate(graph, source='', cores=1, simd=False):
 // ---- second core ----
 // Core 1 waits on the SIO FIFO for a job number, runs it, and pushes the number back. Each FIFO
 // transfer is fenced with a DMB so the other core sees every buffer write made before it.
-static const int8_t *volatile job_img;
-static int32_t ch1_a[{plane}], ch1_b[{plane}];   // core 1's own per-channel planes
+{"" if img16 else "static const int8_t *volatile job_img;" + chr(10)}static int32_t ch1_a[{plane}], ch1_b[{plane}];   // core 1's own per-channel planes
 {f"static int16_t ch1_16_a[{plane}] __attribute__((aligned(4))), ch1_16_b[{plane}] __attribute__((aligned(4)));  // core 1's int16 planes" + chr(10) if uses16 else ""}
 static void run_job(uint32_t job) {{
     switch (job) {{
@@ -449,7 +610,7 @@ static inline void start_job(uint32_t job) {{ run_job(job); }}
 static inline void join_job(void) {{}}
 #endif
 '''
-        body += ['    job_img = img;', '    start_job(1);'] + seg_loop(half, n_ch, 'ch_a', 'ch_b', True, p16=p16_0) + \
+        body += ([] if img16 else ['    job_img = img;']) + ['    start_job(1);'] + seg_loop(half, n_ch, 'ch_a', 'ch_b', True, p16=p16_0) + \
                 ['    join_job();', f'    PROF_STAGE({stage_id["join"]});']
     src = 'feat'
     for nd in rest:
@@ -458,6 +619,8 @@ static inline void join_job(void) {{}}
             src = 'act'
         elif nd.op == 'linear':
             dst = 'logits' if nd is rest[-2] else 'acc'
+            if nd.name in pre_call:     # runs on core 0 before core 1 is started, counted in this stage
+                body.append(f'    {pre_call[nd.name]}({src});')
             if nd.name in par_linear:
                 assert src == 'act' and dst == 'acc'
                 body += [f'    start_job({job_of[nd.name]});',
@@ -473,9 +636,11 @@ static inline void join_job(void) {{}}
         '    return best;',
     ]
 
-    variant = ('v0 (one core' if cores == 1 else 'v1 (two cores') + (', SMLAD on int16 planes' if simd else '')
+    variant = ('v0 (one core' if cores == 1 else 'v1 (two cores') + (', SMLAD on int16 planes' if simd else '') + \
+              (f', ternary as {ternary}' if ternary != 'base3' else '')
     names = ', '.join(f'"{n}"' for n in stage_names)
-    regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '') + (' --simd' if simd else '')
+    regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '') + (' --simd' if simd else '') + \
+            (f' --ternary {ternary}' if ternary != 'base3' else '')
     desc = '\n'.join('//   ' + l for l in graph.describe().splitlines())
     head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c {variant}, all weights as packed data).
 // Source: {source}
@@ -492,10 +657,10 @@ uint32_t ref_stage_cycles[REF_MAX_STAGES];
 
 // ---- activations: static, fixed addresses ----
 static int32_t ch_a[{plane}], ch_b[{plane}];   // per-channel planes of the fused conv segment (core 0)
-{f"static int16_t ch16_a[{plane}] __attribute__((aligned(4))), ch16_b[{plane}] __attribute__((aligned(4)));  // int16 planes (bound-proven)" + chr(10) if uses16 else ""}static int32_t feat[{feat_ch * n_ch}];          // conv segment output, CHW
+{f"static int16_t ch16_a[{plane}] __attribute__((aligned(4))), ch16_b[{plane}] __attribute__((aligned(4)));  // int16 planes (bound-proven)" + chr(10) if uses16 else ""}{IMG16_DECL if img16 else ""}static int32_t feat[{feat_ch * n_ch}];          // conv segment output, CHW
 static int32_t acc[{tail_max}];
 static int8_t act[{tail_max}];
-
+{extra_globals}
 // ---- weights ----
 '''
     assert len(stage_names) <= 16
@@ -514,16 +679,17 @@ static int8_t act[{tail_max}];
         bnote = '\n'.join(f'//   {nd.name}: values in [{bd[nd.name][0]}, {bd[nd.name][1]}], |partial sums| <= {bd[nd.name][2]}'
                           f' -> {ot}{" (SMLAD)" if kern == "smlad" else ""}' for nd, it, ot, kern in plan)
         head = head.replace('// ---- weights ----', '// ---- proven value ranges (compiler/mafc/bounds.py) ----\n' + bnote +
-                            '\n' + SIMD_HELPERS + '\n// ---- weights ----')
+                            '\n' + SIMD_HELPERS + (WIDEN_IMG if img16 else '') + '\n// ---- weights ----')
     return (head + ''.join(weights) + '\n// ---- layers ----\n' + '\n'.join(funcs) + dual +
             '\nuint32_t ref_infer(const int8_t img[REF_IMG_PIXELS], int32_t logits[REF_N_CLASSES]) {\n' +
             '\n'.join(body) + '\n}\n')
 
 
-def write(graph, out_dir, source='', cores=1, simd=False):
+def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3'):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    c_path = out_dir / (f'mafc_{graph.name}' + ('_dual' if cores == 2 else '') + ('_simd' if simd else '') + '.c')
-    c_path.write_text(generate(graph, source, cores, simd), encoding='utf-8', newline='\n')
+    c_path = out_dir / (f'mafc_{graph.name}' + ('_dual' if cores == 2 else '') + ('_simd' if simd else '') +
+                        (f'_{ternary}' if ternary != 'base3' else '') + '.c')
+    c_path.write_text(generate(graph, source, cores, simd, ternary), encoding='utf-8', newline='\n')
     (out_dir / f'mafc_{graph.name}.ir.json').write_text(graph.to_json(), encoding='utf-8', newline='\n')
     return c_path

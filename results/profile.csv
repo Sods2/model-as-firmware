@@ -14,3 +14,27 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-11 18:19,mafc_v0_ram_prof,tern80,pico,200,100.0,100.0,100.0,8.197,1229533,1229498,1230000,150,46.48,55.73,,,branch-free ReLU
 2026-11-11 18:19,mafc_v0_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,7.477,1121492,1121454,1121960,150,48.67,57.91,,,branch-free ReLU
 2026-11-11 18:19,mafc_v1_dual_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,4.234,635155,635073,635252,150,51.0,61.79,,,branch-free ReLU
+2026-11-11 20:01,mafc_v0_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,7.275,1091281,1091207,1091714,150,49.83,59.57,,,"conv1 SMLAD, first kernel (widened image + old SMLAD kernel; register spills, superseded by v2)"
+2026-11-11 20:01,mafc_v1_dual_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,3.963,594397,594375,594488,150,52.04,63.31,,,"conv1 SMLAD, first kernel (widened image + old SMLAD kernel; register spills, superseded by v2)"
+2026-11-11 20:09,mafc_v0_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,5.294,794047,793895,794405,150,49.69,59.43,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:09,mafc_v1_dual_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,3.074,461077,461017,461284,150,51.79,63.06,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:09,mafc_v0_simd_prof,tern80,pico,200,100.0,100.0,100.0,6.043,906512,900462,996338,150,49.8,9.74,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:10,mafc_v1_dual_simd_prof,tern80,pico,200,100.0,100.0,100.0,4.427,664031,658586,765248,150,51.9,11.28,,,"SMLAD v2 kernel (conv1 SMLAD, A/B packing, USAT)"
+2026-11-11 20:43,mafc_v0_simd_sparse_ram_prof,tern80,pico,200,100.0,100.0,100.0,4.192,628728,628687,629193,150,73.8,83.55,,,fc1 format
+2026-11-11 20:43,mafc_v0_simd_code_ram_prof,tern80,pico,200,100.0,100.0,100.0,3.908,586227,586182,586687,150,132.64,142.38,,,fc1 format
+2026-11-11 20:44,mafc_v0_simd_dense_ram_prof,tern80,pico,200,100.0,100.0,100.0,4.269,640322,640261,640769,150,73.35,83.72,,,fc1 format
+2026-11-11 20:44,mafc_v1_dual_simd_sparse_ram_prof,tern80,pico,200,100.0,100.0,100.0,2.528,379213,379167,379308,150,75.86,87.13,,,fc1 format
+2026-11-11 20:44,mafc_v1_dual_simd_code_ram_prof,tern80,pico,200,100.0,100.0,100.0,2.332,349873,349852,349964,150,128.81,140.09,,,fc1 format
+2026-11-11 20:45,mafc_v1_dual_simd_dense_ram_prof,tern80,pico,200,100.0,100.0,100.0,2.638,395695,395663,395911,150,75.14,87.05,,,fc1 format
+2026-11-11 20:45,mafc_v0_simd_sparse_prof,tern80,pico,200,100.0,100.0,100.0,6.413,961964,957208,966988,150,73.91,9.74,,,fc1 format
+2026-11-11 20:45,mafc_v0_simd_code_prof,tern80,pico,200,100.0,100.0,100.0,8.482,1272349,1270351,1274528,150,132.75,9.74,,,fc1 format
+2026-11-11 20:46,mafc_v0_simd_dense_prof,tern80,pico,200,100.0,100.0,100.0,6.371,955596,951422,958803,150,73.46,10.37,,,fc1 format
+2026-11-11 20:46,mafc_v1_dual_simd_sparse_prof,tern80,pico,200,100.0,100.0,100.0,6.745,1011778,1004383,1039030,150,75.97,11.28,,,fc1 format
+2026-11-11 20:46,mafc_v1_dual_simd_code_prof,tern80,pico,200,100.0,100.0,100.0,12.058,1808712,1805751,1814577,150,128.92,11.28,,,fc1 format
+2026-11-11 20:47,mafc_v1_dual_simd_dense_prof,tern80,pico,200,100.0,100.0,100.0,6.56,983973,978338,1010785,150,75.26,11.9,,,fc1 format
+2026-11-11 20:49,mafc_v0_simd_code_prof,tern80,pico,200,100.0,100.0,100.0,4.171,625698,621918,712374,150,132.76,9.74,,,fc1 format (code in SRAM)
+2026-11-11 20:50,mafc_v1_dual_simd_code_prof,tern80,pico,200,100.0,100.0,100.0,2.937,440619,434169,533197,150,128.93,11.28,,,fc1 format (code in SRAM)
+2026-11-11 20:50,mafc_v1_dual_simd_code_ram_prof,tern80z70,pico,200,100.0,100.0,100.0,2.272,340759,340726,340912,150,87.89,99.16,,,fc1 format (code in SRAM)
+2026-11-11 20:50,mafc_v1_dual_simd_code_ram_prof,tern80z90,pico,200,100.0,100.0,100.0,2.216,332445,332396,332617,150,59.93,71.2,,,fc1 format (code in SRAM)
+2026-11-11 20:51,mafc_v1_dual_simd_ram_prof,tern80z70,pico,200,100.0,100.0,100.0,3.039,455895,455842,456141,150,51.79,63.07,,,fc1 format (code in SRAM)
+2026-11-11 20:51,mafc_v1_dual_simd_ram_prof,tern80z90,pico,200,100.0,100.0,100.0,3.02,452930,452831,452954,150,51.79,63.07,,,fc1 format (code in SRAM)

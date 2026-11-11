@@ -2,6 +2,35 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 11 Nov 2026 (late night): fc1 formats; fc1 as code (idea A)
+
+- `compile.py --ternary {base3,sparse,code,dense}`, `-DTERNARY=` in CMake, and `build:model:mem:ternary` in `measure.sh`. All 18 new variants are bit-exact on the PC.
+- fc1 stage cycles (tern80), base3 → code: 256k → 50k on one core and 139k → 28k on two cores, from SRAM. sparse (94k/57k) and dense (103k/74k) are in between.
+- From flash, every format bigger than the 16 KB XIP cache is slower than base3. code from flash took 611k cycles (1.3M on two cores). Fix: the code function always goes in SRAM (`__not_in_flash_func`); now 51k/29k in flash builds too.
+- Sparsity pays only with code: fc1 28k (tern80) → 19k (z70) → 11k (z90) on two cores; base3 stays at 131–139k.
+- Whole model, 10k images, bit-exact:
+  - two cores: **2.32 ms from SRAM (6.25x faster than CMSIS-NN)**, 2.89 ms from flash with fc1 in SRAM;
+  - one core: 3.87 ms (SRAM), 4.11 ms (flash);
+  - z70 2.26 ms, z90 2.21 ms (two cores, SRAM). FINDINGS F16.
+- Measurement bug found and fixed: `run.py` RAM = data + bss missed the code copied to SRAM. Berkeley `size` counts executable `.data` as text, so a flash code build showed 9.7 KB of RAM instead of 97 KB. RAM now = sections at SRAM addresses (`size -A`), excluding heap and stacks. Rows before this change used the old formula (see results/README.md).
+- Profile rows from the first conv1-SMLAD try were relabelled "first kernel ... superseded" in `profile.csv`.
+
+## 11 Nov 2026 (night): conv1 on SMLAD, SMLAD kernel v2
+
+- conv1 now runs on SMLAD. It is a broadcast conv, so the int8 image is widened to int16 once per inference (`widen_img`) and every channel runs the depthwise SMLAD kernel on it. No `SXTB16` needed.
+- First try (old kernel): conv1 only 451k → 423k cycles. The loop spilled: 45 instructions, 11 stack accesses (6 kernel words + sums + pointers don't fit 13 registers). Profile rows labelled "first kernel".
+- Kernel v2 for all three convs:
+  - kernel words A = (k0,k1), B = (k1,k2), so no halfword repack;
+  - `SMUAD` to start the sums;
+  - `USAT` for ReLU + shift;
+  - one word store per int16 output pair;
+  - x loop kept rolled (full unroll spilled more).
+- Result: conv1 and dw1 loops are 24 instructions with no spills (were 45 and 37).
+- Stage cycles, one core, SRAM: conv1 451k → 232k, dw1 273k → 170k, dw2 34k → 24k.
+- Whole model, 10k images, bit-exact: two cores SRAM **4.23 → 3.05 ms (4.76x faster than CMSIS-NN)**; flash 5.40 → 4.38 ms; one core 7.44 → 5.23 ms (SRAM), 8.11 → 5.97 ms (flash). FINDINGS F15.
+- fc1 is now the largest stage (30% on two cores from SRAM). Next: fc1 formats / idea A.
+- `harness/asm_loops.py` gained `--max N` (to see unrolled loops) and a `[sp]` column (spills).
+
 ## 11 Nov 2026 (evening): branch-free ReLU in the back end
 
 - `relu_shift()` in the back end: every conv ReLU is now written clamp-then-shift. All 12 generated variants changed and are bit-exact on the PC (10k images); the 8 tern80 board builds are bit-exact (10k images).

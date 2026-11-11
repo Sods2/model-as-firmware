@@ -1,6 +1,6 @@
 # Findings so far
 
-*Consolidated 11 Nov 2026, covering Phase 0 and Phase 1 up to compiler v1 (dual core) the core-contention test, and SMLAD on the depthwise convs. One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
+*Consolidated 11 Nov 2026, covering Phase 0 and Phase 1 up to compiler v1 (dual core), the core-contention test, SMLAD on all three convs, and four fc1 weight formats (fc1 as code). One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
 
 Setup for all numbers:
 - **Board and clock:** Raspberry Pi Pico 2 (RP2350, Cortex-M33) at 150 MHz.
@@ -20,10 +20,18 @@ Setup for all numbers:
 | mafc v0 | SRAM | 8.18 ms | 1.23M | 1.77x | 46.3 KB | 55.5 KB | `results/phase1.csv` |
 | mafc v1 (two cores) | flash | 5.46 ms | 0.82M | 3.43x | 48.9 KB | 10.8 KB | `results/phase1.csv` |
 | mafc v1 (two cores) | SRAM | 4.53 ms | 0.68M | 3.21x | 48.8 KB | 59.5 KB | `results/phase1.csv` |
-| mafc v1 + SMLAD (two cores) | flash | 5.40 ms | 0.81M | 3.46x | 50.9 KB | 10.8 KB | `results/phase1.csv` |
-| **mafc v1 + SMLAD (two cores)** | **SRAM** | **4.23 ms** | **0.63M** | **3.44x** | 50.8 KB | 61.6 KB | `results/phase1.csv` |
+| mafc v0 + SMLAD (one core) | flash | 5.97 ms | 0.90M | 3.13x | 49.6 KB | 9.7 KB | `results/phase1.csv` |
+| mafc v0 + SMLAD (one core) | SRAM | 5.23 ms | 0.78M | 2.78x | 49.5 KB | 59.3 KB | `results/phase1.csv` |
+| mafc v1 + SMLAD (two cores) | flash | 4.38 ms | 0.66M | 4.27x | 51.7 KB | 11.3 KB | `results/phase1.csv` |
+| mafc v1 + SMLAD (two cores) | SRAM | 3.05 ms | 0.46M | 4.76x | 51.6 KB | 62.9 KB | `results/phase1.csv` |
+| mafc v0 + SMLAD + fc1 as code (one core) | flash, fc1 in SRAM | 4.11 ms | 0.62M | 4.55x | 132.6 KB | 101.5 KB* | `results/phase1.csv` |
+| mafc v0 + SMLAD + fc1 as code (one core) | SRAM | 3.87 ms | 0.58M | 3.75x | 132.5 KB | 135.7 KB* | `results/phase1.csv` |
+| mafc v1 + SMLAD + fc1 as code (two cores) | flash, fc1 in SRAM | 2.89 ms | 0.43M | 6.47x | 128.8 KB | 97.5 KB* | `results/phase1.csv` |
+| **mafc v1 + SMLAD + fc1 as code (two cores)** | **SRAM** | **2.32 ms** | **0.35M** | **6.25x** | 128.6 KB | 133.4 KB* | `results/phase1.csv` |
 
-All mafc rows were re-measured on 11 Nov with the branch-free ReLU (F14), which sped up every mafc build. The earlier numbers (v0 8.83 ms, v1 4.80 ms, v1 + SMLAD 4.36 ms from SRAM) are in F13, `results/phase1.csv` (rows with an empty `notes` column) and `results/README.md`.
+\* RAM counted the new way (from 11 Nov, F16): every section linked at an SRAM address, excluding heap and stacks. The older rows used data + bss (+ text for SRAM builds). That overstated SRAM builds by about 5–6 KB, understated flash builds by about 2 KB, and would have missed code placed in SRAM entirely.
+
+All mafc rows were re-measured on 11 Nov with the branch-free ReLU (F14), which sped up every mafc build. The SMLAD rows are the v2 kernel (F15: conv1 on SMLAD too, no repacking, ReLU as one `USAT`). The earlier numbers (v0 8.83 ms, v1 4.80 ms, v1 + SMLAD 4.36 → 4.23 ms from SRAM) are in F13/F14, `results/phase1.csv` (the `notes` column says which version) and `results/README.md`.
 
 The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% for every ternary-pipeline build and 99.44% for CMSIS-NN, against 99.45% for the PyTorch model. Energy is **not measured yet** (step 2b, waiting for the USB-C cable).
 
@@ -87,7 +95,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
 - **Evidence:** with bound-proven int16 planes and SMLAD (two outputs per step), dw1 runs 29% faster and dw2 35% faster (one core, SRAM). Whole model: 1.07x on one core from SRAM, **1.10x on two cores from SRAM (4.80 → 4.36 ms, 3.33x faster than CMSIS-NN)**, about 1.05x from flash. Bit-exact on 10k images.
 - **But:** conv1 got 12% *slower* only because it now stores int16, while its arithmetic is unchanged. That's the second time gcc's code generation has moved a stage by about 10% (see F6).
 - **Root cause (checked in the disassembly):** with an int16 store, gcc -O3 compiles the ReLU `s < 0 ? 0 : (int16_t)(s >> 4)` of the *second* output in each unrolled pair as a conditional branch (`blt`), not IT-predicated. It also rotates the loop, so there's an unconditional `b.n` back-edge plus a `beq` exit. 49% of conv1 sums are negative, so the branchy path runs about every other output. That's 1 taken branch per pair in v0, against 2 (non-negative) or 3 (negative) now, plus one more stack reload. Measured: 59.5 → 66.6 cycles per output pair. Writing the ReLU as clamp-then-shift (`t = s > 0 ? s : 0; o = t >> 4`) compiles to a branch-free `bic r, r, r, asr #31`, which is shorter than v0's IT block too Fixed and timed in F14. Details: notes/compiler.md.
-- **Meaning:** conv1 is now the biggest stage (about 40%). It needs its own SIMD path (`SXTB16` on the int8 image + `SMLAD`) and a look at the generated assembly. Gains from flash are smaller, because flash time is partly memory-bound (F2, F12).
+- **Meaning:** conv1 is now the biggest stage (about 40%). It needs its own SIMD path and a look at the generated assembly (done in F15). Gains from flash are smaller, because flash time is partly memory-bound (F2, F12).
 
 ### F14. How the ReLU is written moves the conv layers by 10–20%
 - **Evidence:** the back end now writes every conv ReLU as clamp-then-shift, `(s > 0 ? s : 0) >> sh`, instead of `s < 0 ? 0 : s >> sh`. The results are identical, because `0 >> sh` is 0. All 12 generated variants are bit-exact on the PC (10k images, 3 models), and the 8 tern80 builds are bit-exact on the board (10k images). gcc now compiles the ReLU as `bic r, r, r, asr #31; asrs`, with no branch or IT block in any conv loop.
@@ -103,16 +111,95 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
 - **Whole model (10k images):** v0 −7% (8.83 → 8.18 ms from SRAM), v1 two cores −6% (4.80 → 4.53 ms), v0 + SMLAD −10% (8.29 → 7.44 ms), **v1 + SMLAD −3% (4.36 → 4.23 ms from SRAM, 3.44x faster than CMSIS-NN)**. From flash: 8.66, 5.46, 8.11 and 5.40 ms. On two cores the gain is smaller, because each core's conv half shrank but fc1 and the join didn't.
 - **Meaning:** F6 and F13 were the same thing: small source-level choices change gcc's code for the hot loops by 10–20%. The back end should keep checking its loops (branch and IT counts in the disassembly) after every change. conv1 still has no SIMD path and is the largest stage (38–40%).
 
+### F15. A register-tight SMLAD kernel halves the conv layers; conv1 uses it on a widened image
+- **Evidence:** a second SMLAD kernel, used by conv1, dw1 and dw2. All 6 SIMD variants are bit-exact on the PC (10k images, 3 models), and the 4 tern80 SIMD builds are bit-exact on the board (10k images).
+  - **conv1:** it is a broadcast conv, so all 80 output channels read the same image. The int8 image is widened to an int16 plane once per inference (256 values). Every channel then runs the SMLAD kernel on it, so no per-channel `SXTB16` unpacking is needed.
+  - **Kernel packing:** two halfword pairs per kernel row, A = (k0, k1) and B = (k1, k2). For the input words p = (i0, i1) and q = (i2, i3): s0 += SMLAD(p, A) + SMLABT(q, B), and s1 += SMLATB(p, A) + SMLAD(q, B). That is 4 MACs and 2 loads per row with no halfword repacking; the old kernel needed `lsl` + `orr` per row.
+  - **ReLU + shift:** one `USAT #15, s, asr #sh` (int16 output) instead of `bic` + `asr`. This is exact: a negative sum shifts to a negative value and clamps to 0, and the upper clamp can't be reached because the output range is proven to fit.
+  - **Rest of the kernel:** sums start with `SMUAD` (frees the zero register), the two int16 results go out as one word store, and the x loop is kept rolled (`#pragma GCC unroll 1`).
+- **Inner loop, two outputs:** conv1 45 → **24 instructions**, dw1 37 → **24**, dw2 73 → 47. Stack accesses per iteration: conv1 11 → **0**, dw1 4 → 0.
+  - The first attempt reused the old kernel on the widened image. conv1 dropped only 6% (451k → 423k cycles), because gcc ran out of registers and spilled weights and pointers (45 instructions, 11 stack accesses).
+  - Fully unrolling the x loop made it worse: gcc hoisted the loads and spilled about 10 times per pair.
+- **Stage cycles (one core, SRAM, image 0):**
+
+  | Stage | before (F14) | after |
+  |---|---|---|
+  | conv1 | 451k | **232k (−49%)** |
+  | dw1 | 273k | **170k (−38%)** |
+  | dw2 | 34k | 24k (−29%) |
+
+  On two cores (SRAM), core 0 timings: conv1 239k → 128k, dw1 143k → 94k, join 33k → 25k. That is about 29.5 cycles per output pair for both conv1 and dw1, against 24 instructions in the loop.
+- **Whole model (10k images):**
+
+  | Build | before | after | vs CMSIS-NN |
+  |---|---|---|---|
+  | v1 + SMLAD, two cores, SRAM | 4.23 ms | **3.05 ms** | **4.76x** |
+  | v1 + SMLAD, two cores, flash | 5.40 ms | 4.38 ms | |
+  | v0 + SMLAD, one core, SRAM | 7.44 ms | 5.23 ms | |
+  | v0 + SMLAD, one core, flash | 8.11 ms | 5.97 ms | |
+
+- **Meaning:** the convs went from about 75% of the time to about 50%.
+  - fc1 is now the largest stage: 30% on two cores from SRAM (139k cycles) and 35% on one core from flash. It is the next target: weight formats and idea A.
+  - The lesson from F14 holds again. On the M33 the win came from fitting the loop into 13 registers, not from the SIMD instruction alone. Count stack accesses (`harness/asm_loops.py` shows them) as well as instructions.
+
+### F16. Compiling fc1 into code (idea A) makes it 5x faster from SRAM, and sparsity becomes speed
+- **Evidence:** `compile.py --ternary {base3, sparse, code, dense}` sets the format of the ternary layer (fc1).
+  - All 18 variants (3 models × 1/2 cores × 3 new formats) are bit-exact on the PC (10k images).
+  - The code builds are bit-exact on the board (10k images; tern80 on one and two cores, SRAM and flash; z70/z90 on two cores, SRAM).
+  - The formats:
+    - **base3:** the existing format, 10 trits per uint16 (6 KB), decoded with a multiply and a branch per weight.
+    - **sparse:** per row, the uint16 input indices of the +1 weights, then of the −1 weights (30 KB for tern80), summed in a loop.
+    - **code:** idea A. One straight-line expression per row, `out[o] = in[3] + in[17] … - in[5] …`: 86 KB of Thumb code for tern80's 15,360 nonzeros.
+    - **dense:** int8 trits, 4 per word (30 KB), unpacked with `SXTB16` and multiplied with `SMLAD` against an int16 copy of the activations.
+- **fc1 stage cycles (tern80, image 0, profile builds):**
+
+  | Format | 1 core SRAM | 2 cores SRAM | 1 core flash | 2 cores flash |
+  |---|---|---|---|---|
+  | base3 | 256k | 139k | 317k | 225k |
+  | sparse | 94k | 57k | 311k | 513k |
+  | **code** | **50k** | **28k** | 611k (from flash) → **51k** (placed in SRAM) | 1,306k → **29k** |
+  | dense | 103k | 74k | 307k | 489k |
+
+  - **From SRAM:** code is 5.1x faster than base3, at about 3.3 cycles per nonzero weight. gcc loads each of the 320 activations once and sums each row with one add or sub per nonzero (about 2 instructions per nonzero).
+  - **From flash:** every format bigger than the 16 KB XIP cache is limited by flash bandwidth, at roughly 7–10 cycles per byte of weights or code. Two cores make that worse, not better (F12). base3 (6 KB) is the best format that runs from flash.
+  - **Placement fixes it:** the code format's function now always goes to `.time_critical` (copied to SRAM at boot, `__not_in_flash_func`), so flash builds run it at SRAM speed. This answers the main part of U1.
+- **Sparsity (two cores, SRAM, fc1 stage cycles):**
+
+  | Model (fc1 zeros) | base3 | code |
+  |---|---|---|
+  | tern80 (50%) | 139k | 28k |
+  | tern80z70 (70%) | 134k | 19k |
+  | tern80z90 (90%) | 131k | 11k |
+
+  The packed format pays for every weight, zero or not. Code pays only for nonzeros, so pruning turns directly into speed. This is the project's core claim, now measured.
+- **Whole model (10k images):**
+
+  | Build | Latency | vs CMSIS-NN |
+  |---|---|---|
+  | Two cores, SRAM | 3.05 → **2.32 ms** | **6.25x** |
+  | Two cores, flash (fc1 in SRAM) | 4.38 → 2.89 ms | 6.47x vs CMSIS-NN from flash; 5.0x vs the 14.52 ms bar |
+  | One core, SRAM | 5.23 → 3.87 ms | |
+  | One core, flash (fc1 in SRAM) | 5.97 → 4.11 ms | |
+  | z70, two cores, SRAM | 2.26 ms | 99.47% accuracy |
+  | z90, two cores, SRAM | 2.21 ms | 99.51% accuracy |
+
+- **Cost:** code is big. tern80's fc1 is 86 KB (z70 about 50 KB, z90 about 22 KB) against 6 KB packed. That is fine on a 520 KB-SRAM chip at MNIST size, but it is the trade-off to track for larger models. The sparse and dense formats lost to code everywhere and are kept only for comparison.
+- **Measurement fix:** `run.py` counted RAM as data + bss from Berkeley `size`. That reports executable `.data` (code copied to SRAM) as text, so the first flash code build showed 9.7 KB of RAM instead of about 97 KB. RAM is now summed from the sections linked at SRAM addresses (`size -A`); see the note under the headline table.
+- **Meaning:**
+  - With fc1 down to 8% of the time, the convs are about 70% again: conv1 36%, dw1 27%, with the join wait at 7% and fc2 at 9% (two cores, SRAM).
+  - For larger models, the choice between data and code is a placement question: what fits in SRAM, and what streams from flash.
+
 ## Open questions and next experiments
 
 | Question | How to test | Status |
 |---|---|---|
 | Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b) | Waiting for cable |
 | Bytes actually read from flash per inference | No XIP counters on the RP2350 ([pico-toolchain.md](pico-toolchain.md)); estimate from weight layout, or the Debug Probe | Open |
-| How much does SMLAD save? | Done for dw1 and dw2 (F13), 1.07–1.10x overall. The conv1 int16-store regression is fixed (F14). Next: conv1 SIMD (SXTB16) | dw1/dw2 done; conv1 SIMD next |
-| Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | Three-plus builds of fc1, same harness | Next |
+| How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
+| Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |
+| Where does the remaining time go? (two cores, fc1 as code) | conv1 36%, dw1 27%, join wait 7%, fc2 9%. Candidates: rebalance the channel split (core 0 waits about 24k cycles for core 1), fc2 as code or SMLAD, pool1 | Next |
 | Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Train or borrow a model with many input channels | Not started |
-| Is the second core's flash penalty about cache thrashing or bandwidth? | Contention measured (F12): moderate on convs, strong on fc1. Next: fc1 weights in SRAM vs conv code in SRAM vs both (U1) | Measured; placement test next |
+| Is the second core's flash penalty about cache thrashing or bandwidth? | Contention measured (F12): moderate on convs, strong on fc1. With fc1 as code in SRAM (F16), the flash build is 2.89 ms against 2.32 ms all-SRAM. The remaining 25% is the convs and fc2 from flash | Partly answered |
 
 ## Caveats
 

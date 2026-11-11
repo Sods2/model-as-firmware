@@ -123,7 +123,69 @@ Measured (stage cycles, one core, SRAM): SMLAD build conv1 522k → 451k, dw1 32
 
 Lesson: the select form cost far more than its own instructions; it changed register allocation and scheduling of whole loops. That's also most of the old v0 dw1 regression (F6). Check branch and IT counts in the hot loops after every back-end change.
 
-**Next:** conv1 is still the largest stage (38–40% of cycles). It needs its own SIMD path. Its input is the int8 image, so pairs come from `SXTB16` on a word of four pixels, then `SMLAD` against packed (k1,k0) pairs. Its outputs are provably ≤ 2,643 and its partial sums ≤ 42k, so int16 arithmetic is exact.
+**Next:** conv1 is still the largest stage (38–40% of cycles). It needs its own SIMD path. Its input is the int8 image, so pairs come from `SXTB16` on a word of four pixels, then `SMLAD` against packed (k1,k0) pairs. Its outputs are provably ≤ 2,643 and its partial sums ≤ 42k, so int16 arithmetic is exact. (Done differently, in step 4.)
+
+### v1 step 4: conv1 on SMLAD, kernel v2 (11 Nov 2026)
+
+**conv1 without SXTB16.** conv1 is a broadcast conv: all 80 output channels read the same 16×16 image. So `widen_img()` copies the int8 image into an int16 plane `img16` once per inference (256 values, inside the conv1 stage). Every channel then runs the same SMLAD kernel as the depthwise convs. Unpacking with `SXTB16` per channel would redo the same work 80 times. In the dual build, core 0 widens the image before starting core 1, and the FIFO push is fenced with a DMB.
+
+**First try: old kernel on `img16`.** conv1 only dropped from 451k to 423k cycles (−6%). The disassembly showed why: 45 instructions per output pair, 11 of them stack accesses. gcc needs 6 kernel words, 2 sums, 4 loaded words, the repack temp, 2 output pointers and a counter. That doesn't fit in the M33's 13 usable registers.
+
+**Kernel v2** (`emit_conv_ch_smlad`, used by conv1, dw1 and dw2):
+
+| Change | Why |
+|---|---|
+| Kernel words A = (k0,k1), B = (k1,k2) per row: s0 += SMLAD(p,A) + SMLABT(q,B), s1 += SMLATB(p,A) + SMLAD(q,B) | No `(p >> 16) \| (q << 16)` repack: 2 fewer instructions and one fewer temp per row. Still 6 words per kernel |
+| Row 0 uses `SMUAD` (no accumulator) | gcc had kept a register holding 0 |
+| ReLU + shift as `USAT(s >> sh, 15)` (31 for int32 outputs) | One `usat r, #15, r, asr #4` instead of `bic` + `asr`. Exact: negative → 0; the top clamp can't be reached (proven range) |
+| int16 output pair stored as one word, `v0 \| v1 << 16` | One store and one output pointer instead of two. Exact because both values are in [0, 2^15) |
+| `#pragma GCC unroll 1` on the x loop | Full unrolling (tried with `#pragma GCC unroll 7`) hoisted loads and spilled about 10 times per pair. Without the pragma, gcc fully unrolled dw1 by itself, with the same result |
+
+Inner loops (two outputs; `harness/asm_loops.py --max 2000` now also counts `[sp]` accesses):
+
+| Loop | F14 kernel | first conv1 try | v2 |
+|---|---|---|---|
+| conv1 | 46 instr (int8 input, plain) | 45 instr, 11 `[sp]` | **24 instr, 0 `[sp]`** |
+| dw1 | 37 instr, 4 `[sp]` | same | **24 instr, 0 `[sp]`** |
+| dw2 (int32 out) | 73 instr | same | 47 instr |
+
+Measured, stage cycles on one core from SRAM: conv1 451k → 232k, dw1 273k → 170k, dw2 34k → 24k. That is about 29.5 cycles per output pair for both conv1 and dw1, with 24 instructions in the loop plus the row overhead.
+
+Whole model, 10k images, bit-exact (tern80 on the board; all 6 SIMD variants on the PC):
+
+| Build | flash | SRAM |
+|---|---|---|
+| v0 + SMLAD | 8.11 → 5.97 ms | 7.44 → 5.23 ms |
+| v1 + SMLAD, two cores | 5.40 → 4.38 ms | **4.23 → 3.05 ms (4.76x CMSIS-NN)** |
+
+Two-core SRAM profile now: conv1 128k (28%), dw1 94k (20%), pool1 23k, dw2 13k, join 25k, **fc1 139k (30%)**, fc2 32k, fc3 7k. **Next: fc1** (weight formats, then weights as code, idea A).
+
+Possible later conv work (not done):
+- About 5.5 cycles per pair over the instruction count is row overhead and load-use stalls.
+- Two channels per pass would share the 6 loads in conv1, but would need 12 kernel words in registers.
+- pool1 (23k on core 0) is still plain C.
+
+### v1 step 5: fc1 formats and fc1 as code (`compile.py --ternary`, 11 Nov 2026)
+
+`backend_rp2350_c.emit_ternary()` writes the ternary layer in one of three new formats. base3 stays the default and stays in `emit_linear`. The build and file names get a `_<format>` suffix: `mafc_tern80_dual_simd_code.c`, `-DTERNARY=code` in CMake, and `mafc2_s:tern80:ram:code` in `measure.sh`.
+
+| Format | Weights | Inner work | Notes |
+|---|---|---|---|
+| base3 | 10 trits per uint16, 6 KB | `c *= 3; d = c >> 16`, two compares, per weight | about 8.3 cycles per weight |
+| sparse | uint16 indices, +1 list then −1 list per row, 30 KB (+ 2 offset tables) | `s += in[*p++]` (unrolled ×4) | pays only for nonzeros, but about 6 cycles each |
+| code | none: the indices are immediates in the code, 86 KB of Thumb | `ldrsb` once per input, then one add/sub per nonzero | function `noinline`, always placed in SRAM (`__not_in_flash_func`) |
+| dense | int8, 4 per word in byte order w0 w2 w1 w3, 30 KB | `SXTB16`, `SXTB16 ror 8`, 2× `SMLAD` per 4 weights against an int16 copy of the activations | 10 instructions per 4 weights; gcc doesn't fold the `ror` into `sxtb16` |
+
+Measured: see FINDINGS F16. From SRAM, code takes fc1 from 256k to 50k cycles (one core) and from 139k to 28k (two cores). From flash, every format larger than the 16 KB cache gets slower; code ran 12x slower than from SRAM (611k cycles) until it was placed in SRAM.
+
+The code format scales with sparsity (two cores, SRAM): fc1 28k (tern80, 50% zeros), 19k (z70), 11k (z90). base3 stays at 131–139k for all three.
+
+What gcc does with the code format: it loads each of the 320 inputs once (`ldrsb`) at the start and keeps most of them in a 1.5 KB stack frame. Each row then becomes `ldr` from the stack + `add`/`sub` per nonzero. That is about 2 instructions per nonzero, measured at about 3.3 cycles. Ideas to go further: SIMD sums of byte groups shared by several rows, or common-subexpression sharing between rows (idea A's "shared partial sums").
+
+Two-core SRAM profile with fc1 as code: conv1 127k (36%), dw1 94k (27%), pool1 23k, dw2 13k, join 24k, fc1 28k, fc2 33k, fc3 7k; 2.32 ms. **Next candidates:**
+- Rebalance the channel split: core 0 waits about 24k cycles for core 1, because core 1 does its conv half plus the FIFO handshake.
+- fc2 as code or SMLAD (int4, 6,144 weights).
+- pool1.
 
 ## Lessons
 
