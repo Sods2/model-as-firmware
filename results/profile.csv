@@ -1,0 +1,5 @@
+date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct,latency_ms_mean,cycles_mean,cycles_min,cycles_max,sys_mhz,flash_kb,ram_kb,flash_read_kb,energy_mj,notes
+2026-11-11 12:37,ref_c_prof,tern80,pico,200,100.0,100.0,100.0,10.66,1598947,1593119,1691344,150,47.29,7.67,,,
+2026-11-11 12:37,ref_c_ram_prof,tern80,pico,200,100.0,100.0,100.0,10.084,1512638,1512533,1513052,150,47.17,54.84,,,
+2026-11-11 12:38,cmsis_nn_prof,tern80,pico,200,100.0,100.0,100.0,18.724,2808642,2801733,2839357,150,93.88,33.46,,,
+2026-11-11 12:38,cmsis_nn_ram_prof,tern80,pico,200,100.0,100.0,100.0,14.536,2180453,2180408,2181433,150,93.77,127.23,,,

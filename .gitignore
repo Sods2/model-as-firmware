@@ -4,3 +4,10 @@ build/
 # training
 train/.venv/
 train/BitNetMCU/
+
+# firmware build variants and third-party sources
+build-*/
+firmware/baselines/cmsis_nn/third_party/
+
+# python
+__pycache__/

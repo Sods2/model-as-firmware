@@ -65,9 +65,9 @@ Setup B also needs a microSD card and power supply for the Pi 4 (items 7–8, if
 | 2 | Bring-up firmware `firmware/rp2350/hello/`: LED blink + `stdio_usb` printing "hello" + a cycle-counter timing of a fixed loop. Flash it via BOOTSEL. | LED blinks. The COM port prints hello and timings. `picotool info` reads the board. |
 | 2b | Meter sanity check: idle vs busy-loop for 60 s each. Record the meter's resolution. | Busy minus idle gives a stable mWh difference across 3 runs. |
 | 3 | `train/`: Python 3.12 venv with PyTorch (CUDA). Clone BitNetMCU and train its ternary MNIST model. Also train variants with ~70% and ~90% zero weights. | Accuracy matches BitNetMCU's reported numbers. Weights exported. |
-| 4 | `firmware/baselines/ref_c/`: plain-C inference with packed 2-bit weights. | Gets the same predictions as PyTorch on the test images. |
-| 5 | `firmware/baselines/cmsis_nn/`: int8 CMSIS-NN build of the same network. | Runs and its accuracy is logged. |
-| 6 | `harness/`: Python script (pyserial) that sends test images over the COM port, reads class and cycles, compares with PyTorch, and writes a CSV to `results/` using the HANDOFF §6 metric columns. | **Gate 0:** reference matches PyTorch, and both builds have their numbers logged. |
+| 4 | `firmware/baselines/ref_c/`: plain-C inference with packed weights (ternary fc1). | Logits identical to the integer golden model (`harness/golden.py`) on every test image. Prediction agreement with PyTorch logged. *(Revised 11 Nov: the board does integer arithmetic, so 100% agreement with float PyTorch isn't a meaningful target. See `harness/README.md`.)* |
+| 5 | `firmware/baselines/cmsis_nn/`: int8 CMSIS-NN build of the same network. | Runs, bit-exact with its own golden model, and its accuracy is logged. |
+| 6 | `harness/`: Python script (pyserial) that sends test images over the COM port, reads class and cycles, compares with PyTorch, and writes a CSV to `results/` using the HANDOFF §6 metric columns. | **Gate 0:** both builds are bit-exact with their golden models, and both have their numbers logged. Energy (step 2b) to be added. |
 
 Repo layout follows HANDOFF §10: `train/ compiler/ firmware/rp2350/ firmware/baselines/ harness/ results/`. Also update HANDOFF §3 and §9 with the answers so far:
 - Raspberry Pi = Pi 4
@@ -80,9 +80,17 @@ Repo layout follows HANDOFF §10: `train/ compiler/ firmware/rp2350/ firmware/ba
 - **Step 2b blocked.** The power meter is USB-C, so it needs an adapter or a USB-C cable before it can go in line.
 - **Step 3 done.** See `train/README.md`. The ternary CNN80 reaches 99.48% best and 99.45% final, against 99.52% reported by BitNetMCU. The 70% and 90% fc1-zero variants are trained and reach 99.44% and 99.50% final, so sparsity costs no accuracy. Headers are in `train/export/` and weights in `train/models/`. In this model only fc1 is ternary; the convolutions are 8-bit and fc2/fc3 are 4-bit.
 
+## Progress (11 Nov 2026)
+- **Parts ordered:** a USB-C cable for the power meter (unblocks step 2b) and a Raspberry Pi Debug Probe.
+- **Steps 4–6 done; Gate 0 met except for energy.** All builds are bit-exact with their golden models on all 10,000 test images. Full table in `results/README.md`, write-up in `notes/LOG.md`.
+  - Plain-C reference: 99.47% accuracy, 99.98% agreement with PyTorch, 10.21 ms per image from flash and 9.52 ms from SRAM.
+  - CMSIS-NN int8, same weights: 99.44%, 18.70 ms from flash and 14.52 ms from SRAM. **14.52 ms is the speed bar for Gate 1.**
+  - CMSIS-NN's int8 fc1 runs 7.4x faster from SRAM than from flash (its weights overflow the 16 KB XIP cache). The packed ternary weights fit.
+- **Still to do for Gate 0:** step 2b (energy per inference) once the cable arrives, then add `energy_mj` to the results.
+
 ## 3. Open items
 - Exact Pi 4 RAM and whether you have a microSD card and power supply for it. This only matters for Setup B or the later Pi phase.
 - One Pico is enough until idea F, which needs 3.
 
 ## Verification
-Each step's "Done when" column is its check. Gate 0 is checked end to end by running the harness against both firmware builds and getting a CSV with 100% agreement between the C reference and PyTorch.
+Each step's "Done when" column is its check. Gate 0 is checked end to end with `harness/phase0_matrix.sh final`, which builds, flashes and runs every configuration. Each run must report `logits == golden 10000/10000`.

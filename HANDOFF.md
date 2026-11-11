@@ -29,11 +29,12 @@ flowchart LR
 | --- | --- |
 | Research and feasibility | ✅ Done (feasibility study, prior art, verification, ideas A–H) |
 | Docs in repo | ✅ This repo (`Projects/model-as-firmware`), which holds both docs and code |
-| Hardware | ✅ On hand: one Pico 2 with headers, a micro-USB data cable, a USB power meter (USB-C plug) and a Pi 4. ⏳ The rest of the shopping list (Debug Probe, extra Picos, breadboard, wires) isn't ordered; nothing more is needed until Gate 0 |
+| Hardware | ✅ On hand: one Pico 2 with headers, a micro-USB data cable, a USB power meter (USB-C plug) and a Pi 4. ⏳ Ordered 11 Nov: Debug Probe and a USB-C cable for the meter. Extra Picos, breadboard and wires aren't ordered yet; they're needed only for idea F |
 | Pico bring-up | ✅ Builds, flashes with `picotool load -f -x`, prints over USB serial (COM3). The cycle counter reads 150,251 cycles for 1 ms at 150 MHz, ±108 cycles of jitter over 700k |
 | Energy measurement | ⛔ Blocked: the meter needs a USB-C adapter or cable |
 | BitNetMCU baseline | ✅ Reproduced: ternary CNN80 at 99.45% final / 99.48% best (99.52% reported). The 70% and 90% fc1-zero variants reach 99.44% and 99.50%. See `train/README.md` |
-| Plain-C reference, CMSIS-NN baseline, harness | ❌ Not started (Phase 0 steps 4–6) |
+| Plain-C reference, CMSIS-NN baseline, harness | ✅ Done 11 Nov (steps 4–6). Bit-exact with golden models on 10k images. ref_c: 99.47%, 10.21 ms (9.52 ms from SRAM). CMSIS-NN int8: 99.44%, 18.70 ms (14.52 ms from SRAM, the Gate 1 bar). See `results/README.md` |
+| Gate 0 | ⏳ Met except energy: step 2b waits for the USB-C cable (ordered, along with a Debug Probe) |
 | Atome LM baseline | ❌ Not reproduced (Phase 3) |
 
 *Status updated 10 Nov 2026. The step-by-step log is in [GETTING-STARTED.md](GETTING-STARTED.md).*
