@@ -25,6 +25,8 @@ static void cyccnt_init(void) {
     DWT_CTRL |= 1u << 0;   // CYCCNTENA
 }
 
+__attribute__((weak)) void ref_init(void) {}
+
 static int read_byte(void) {
     int c;
     do {
@@ -39,6 +41,7 @@ int main(void) {
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
     gpio_put(PICO_DEFAULT_LED_PIN, 1);
     cyccnt_init();
+    ref_init();
 
     static int8_t img[REF_IMG_PIXELS];
     int32_t logits[REF_N_CLASSES];

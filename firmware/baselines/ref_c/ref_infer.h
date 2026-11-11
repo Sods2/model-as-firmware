@@ -12,6 +12,10 @@
 // class (index of the first maximum logit).
 uint32_t ref_infer(const int8_t img[REF_IMG_PIXELS], int32_t logits[REF_N_CLASSES]);
 
+// Optional one-time set-up, called by the firmware at boot before the first ref_infer()
+// (e.g. starting the second core). pico_main.c provides an empty weak default.
+void ref_init(void);
+
 // Name of the model header compiled in, for logging.
 extern const char ref_model_name[];
 

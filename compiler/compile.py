@@ -3,6 +3,7 @@
   train/.venv/Scripts/python.exe compiler/compile.py --model tern80
       reads  train/export/tern80.h
       writes firmware/rp2350/mafc/gen/mafc_tern80.c (+ .ir.json), checks the IR against the golden model
+  ... --cores 2   writes gen/mafc_tern80_dual.c (conv channels and big linear layers split across both cores)
 """
 import argparse
 import sys
@@ -19,6 +20,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--model', default='tern80')
     ap.add_argument('--out', default=str(ROOT / 'firmware' / 'rp2350' / 'mafc' / 'gen'))
+    ap.add_argument('--cores', type=int, default=1, choices=[1, 2], help='2 = split work across both M33 cores')
     ap.add_argument('--check', type=int, default=1000, help='test images to check IR vs golden (0 = skip)')
     args = ap.parse_args()
 
@@ -34,7 +36,7 @@ def main():
         print(f'IR interpreter == golden on {args.check} images: {ok}')
         if not ok:
             sys.exit(1)
-    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'))
+    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores)
     print(f'wrote {path.relative_to(ROOT)}')
 
 

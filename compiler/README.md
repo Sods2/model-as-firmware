@@ -42,8 +42,12 @@ The back end also round-trips every packed weight array through a decoder before
 - **conv1 reads the int8 image directly.** The hand-written reference widens it to int32 once per channel.
 - Each conv/pool/linear node is a profiling stage (`-DPROFILE_STAGES=ON`).
 
+## Back end v1: two cores (`--cores 2`)
+
+`compile.py --cores 2` writes `gen/mafc_<model>_dual.c`. Build it with `-DDUAL_CORE=ON`, or as `mafc2` in `harness/measure.sh`. The conv channels and the big linear layers (at least 4,096 weights) are split between the two M33 cores. Core 1 runs a job loop on the SIO FIFO, started once at boot by `ref_init()`. On the PC the core-1 share runs inline, so the same split is checked there. Design and numbers are in [notes/compiler.md](../notes/compiler.md).
+
 ## Limits of v0
 
 - Front end: the BitNetMCU CNNMNIST header layout only. A QONNX or `.pth` front end comes later.
 - Back end: 1x16x16 int8 input, a per-channel conv prefix, and a `linear -> 10` + `argmax` end. These match the harness protocol.
-- No SIMD, no second core, no weights as code. Those are what v1 and idea A are for (see `notes/compiler.md`).
+- No SIMD and no weights as code yet. Those are the next v1 steps and idea A (see `notes/compiler.md`).

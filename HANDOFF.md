@@ -35,6 +35,7 @@ flowchart LR
 | BitNetMCU baseline | ✅ Reproduced: ternary CNN80 at 99.45% final / 99.48% best (99.52% reported). The 70% and 90% fc1-zero variants reach 99.44% and 99.50%. See `train/README.md` |
 | Plain-C reference, CMSIS-NN baseline, harness | ✅ Done 11 Nov (steps 4–6). Bit-exact with golden models on 10k images. ref_c: 99.47%, 10.21 ms (9.52 ms from SRAM). CMSIS-NN int8: 99.44%, 18.70 ms (14.52 ms from SRAM, the Gate 1 bar). See `results/README.md` |
 | Compiler v0 (Phase 1 step 7) | ✅ 11 Nov, branch `phase1-compiler-v0`. `compiler/mafc`: front end -> IR -> interpreter -> RP2350 C. Bit-exact on 10k images; 9.33 ms from flash, 8.83 ms from SRAM (1.64x faster than CMSIS-NN). Next: v1 optimizations and idea A (see `notes/compiler.md`) |
+| Compiler v1, second core | ✅ 11 Nov. `--cores 2` splits conv channels and fc1/fc2 rows across both cores. Bit-exact; **4.80 ms from SRAM** (3.0x faster than CMSIS-NN), 5.80 ms from flash. Next: SIMD (SMLAD, proven-safe int16) and idea A for fc1 |
 | Gate 0 | ⏳ Met except energy: step 2b waits for the USB-C cable (ordered, along with a Debug Probe) |
 | Atome LM baseline | ❌ Not reproduced (Phase 3) |
 

@@ -134,8 +134,9 @@ static inline void {node.name}(const int32_t *restrict in, int8_t *restrict out)
 '''
 
 
-def emit_linear(node):
-    """Returns (weights C text, function C text)."""
+def emit_linear(node, rows=False):
+    """Returns (weights C text, function C text). rows=True: the function takes a row range (o0, o1)
+    so two cores can each compute part of the outputs."""
     q = node.attrs['quant']
     w = node.weights
     n_out, n_in = w.shape
@@ -204,6 +205,13 @@ static inline void {node.name}(const int8_t *restrict in, int32_t *restrict out)
 '''
     else:
         raise ValueError(q)
+    if rows:
+        stride = {'ternary': (n_in + (-n_in) % 10) // 10, 'int4sym': n_in // 8, 'int8': n_in}[q]
+        fn = fn.replace('(const int8_t *restrict in, int32_t *restrict out) {',
+                        '(const int8_t *restrict in, int32_t *restrict out, int o0, int o1) {')
+        fn = fn.replace(f'w = {node.name}_w;', f'w = {node.name}_w + o0 * {stride};')
+        fn = fn.replace(f'for (int o = 0; o < {n_out}; o++)', 'for (int o = o0; o < o1; o++)')
+        assert 'o0 * ' in fn and 'o = o0' in fn
     return data, fn
 
 
@@ -220,22 +228,32 @@ def channel_fused_prefix(nodes):
     return seg
 
 
-def generate(graph, source=''):
+PAR_MIN_MACS = 4096   # linear layers smaller than this stay on core 0 (the handshake would cost more)
+
+
+def generate(graph, source='', cores=1):
+    """cores=2: the channel-fused conv segment and the big linear layers are split across both M33 cores.
+    Core 1 runs a job loop fed by the SIO FIFO; on the PC build the core-1 jobs simply run inline first."""
+    assert cores in (1, 2)
     nodes = graph.nodes
     assert nodes[0].op == 'input' and nodes[0].in_shape[0] == 1 and nodes[0].in_shape[1:] == (16, 16), \
-        'v0 back end expects a 1x16x16 int8 input (the harness protocol)'
+        'this back end expects a 1x16x16 int8 input (the harness protocol)'
     seg = channel_fused_prefix(nodes)
     assert seg and nodes[seg[0]].op == 'conv3x3' and nodes[seg[0]].attrs['mode'] == 'broadcast'
     assert all(nodes[i].op != 'conv3x3' or nodes[i].attrs['mode'] == 'depthwise' for i in seg[1:])
     rest = nodes[seg[-1] + 1:]
     assert rest[-1].op == 'argmax' and rest[-2].op == 'linear' and rest[-2].out_shape == (10,), \
-        'v0 back end expects the graph to end in linear(->10) + argmax'
+        'this back end expects the graph to end in linear(->10) + argmax'
 
     n_ch = nodes[seg[0]].out_shape[0]
     plane = max(int(np.prod(nodes[i].out_shape[1:])) for i in seg)
     feat_ch = int(np.prod(nodes[seg[-1]].out_shape[1:]))
-    stage_nodes = [nd for nd in nodes if nd.op in ('conv3x3', 'maxpool2', 'linear')]
-    stage_id = {nd.name: k for k, nd in enumerate(stage_nodes)}
+    par_linear = set()
+    if cores == 2:
+        par_linear = {nd.name for nd in rest if nd.op == 'linear' and nd.weights.size >= PAR_MIN_MACS}
+    stage_names = [nodes[i].name for i in seg] + (['join'] if cores == 2 else []) + \
+                  [nd.name for nd in rest if nd.op == 'linear']
+    stage_id = {n: k for k, n in enumerate(stage_names)}
 
     weights, funcs = [], []
     for i in seg:
@@ -249,36 +267,98 @@ def generate(graph, source=''):
         if nd.op == 'relu_norm':
             funcs.append(emit_relu_norm(nd))
         elif nd.op == 'linear':
-            d, f = emit_linear(nd)
+            d, f = emit_linear(nd, rows=nd.name in par_linear)
             weights.append(d)
             funcs.append(f)
 
-    # buffers for the non-fused tail: one int32 accumulator and one int8 activation buffer, reused
     tail_max = max([int(np.prod(nd.out_shape)) for nd in rest if nd.op in ('relu_norm', 'linear')] + [feat_ch * n_ch])
 
-    body = ['    PROF_BEGIN();', f'    for (int c = 0; c < {n_ch}; c++) {{']
-    cur = 'img'
-    bufs = ['ch_a', 'ch_b']
-    for j, i in enumerate(seg):
-        nd = nodes[i]
-        last = j == len(seg) - 1
-        dst = f'feat + {feat_ch} * c' if last else bufs[j % 2]
-        if nd.op == 'conv3x3':
-            body.append(f'        {nd.name}_ch({cur}, {nd.name}_w + 9 * c, {dst});')
-        else:
-            body.append(f'        {nd.name}_ch({cur}, {dst});')
-        body.append(f'        PROF_STAGE({stage_id[nd.name]});')
-        cur = dst
-    body.append('    }')
+    def seg_loop(lo, hi, pa, pb, prof, indent='    '):
+        out = [f'{indent}for (int c = {lo}; c < {hi}; c++) {{']
+        cur, bufs = 'img', [pa, pb]
+        for j, i in enumerate(seg):
+            nd = nodes[i]
+            dst = f'feat + {feat_ch} * c' if j == len(seg) - 1 else bufs[j % 2]
+            if nd.op == 'conv3x3':
+                out.append(f'{indent}    {nd.name}_ch({cur}, {nd.name}_w + 9 * c, {dst});')
+            else:
+                out.append(f'{indent}    {nd.name}_ch({cur}, {dst});')
+            if prof:
+                out.append(f'{indent}    PROF_STAGE({stage_id[nd.name]});')
+            cur = dst
+        out.append(f'{indent}}}')
+        return out
+
+    half = n_ch // 2
+    dual = ''
+    job_of = {}
+    body = ['    PROF_BEGIN();']
+    if cores == 1:
+        body += seg_loop(0, n_ch, 'ch_a', 'ch_b', True)
+    else:
+        # core-1 jobs: 1 = its half of the conv segment (channels 0..half), 2.. = the upper half of the rows
+        # of each parallel linear layer
+        jobs = ['        case 1: {', '            const int8_t *img = job_img;'] + \
+               seg_loop(0, half, 'ch1_a', 'ch1_b', False, '            ') + ['            break;', '        }']
+        for nd in rest:
+            if nd.name in par_linear:
+                k = len(job_of) + 2
+                job_of[nd.name] = k
+                h = nd.out_shape[0] // 2
+                jobs.append(f'        case {k}: {nd.name}(act, acc, {h}, {nd.out_shape[0]}); break;')
+        jobs_text = '\n'.join(jobs)
+        dual = f'''
+// ---- second core ----
+// Core 1 waits on the SIO FIFO for a job number, runs it, and pushes the number back. Each FIFO
+// transfer is fenced with a DMB so the other core sees every buffer write made before it.
+static const int8_t *volatile job_img;
+static int32_t ch1_a[{plane}], ch1_b[{plane}];   // core 1's own per-channel planes
+
+static void run_job(uint32_t job) {{
+    switch (job) {{
+{jobs_text}
+        default: break;
+    }}
+}}
+
+#if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
+#include "pico/multicore.h"
+#include "hardware/sync.h"
+static void core1_main(void) {{
+    for (;;) {{
+        uint32_t job = multicore_fifo_pop_blocking();
+        __dmb();
+        run_job(job);
+        __dmb();
+        multicore_fifo_push_blocking(job);
+    }}
+}}
+void ref_init(void) {{ multicore_launch_core1(core1_main); }}
+static inline void start_job(uint32_t job) {{ __dmb(); multicore_fifo_push_blocking(job); }}
+static inline void join_job(void) {{ (void)multicore_fifo_pop_blocking(); __dmb(); }}
+#else
+// PC build: no second core; core 1's share runs first, inline. Same partitioning, so the same results.
+void ref_init(void) {{}}
+static inline void start_job(uint32_t job) {{ run_job(job); }}
+static inline void join_job(void) {{}}
+#endif
+'''
+        body += ['    job_img = img;', '    start_job(1);'] + seg_loop(half, n_ch, 'ch_a', 'ch_b', True) + \
+                ['    join_job();', f'    PROF_STAGE({stage_id["join"]});']
     src = 'feat'
     for nd in rest:
         if nd.op == 'relu_norm':
             body.append(f'    {nd.name}({src}, act);')
             src = 'act'
         elif nd.op == 'linear':
-            is_last = nd is rest[-2]
-            dst = 'logits' if is_last else 'acc'
-            body.append(f'    {nd.name}({src}, {dst});')
+            dst = 'logits' if nd is rest[-2] else 'acc'
+            if nd.name in par_linear:
+                assert src == 'act' and dst == 'acc'
+                body += [f'    start_job({job_of[nd.name]});',
+                         f'    {nd.name}(act, acc, 0, {nd.out_shape[0] // 2});',
+                         '    join_job();']
+            else:
+                body.append(f'    {nd.name}({src}, {dst});')
             body.append(f'    PROF_STAGE({stage_id[nd.name]});')
             src = dst
     body += [
@@ -287,38 +367,41 @@ def generate(graph, source=''):
         '    return best;',
     ]
 
-    names = ', '.join(f'"{nd.name}"' for nd in stage_nodes)
-    head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c v0 (all weights as packed data).
+    variant = 'v0 (one core' if cores == 1 else 'v1 (two cores'
+    names = ', '.join(f'"{n}"' for n in stage_names)
+    regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '')
+    desc = '\n'.join('//   ' + l for l in graph.describe().splitlines())
+    head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c {variant}, all weights as packed data).
 // Source: {source}
-// Do not edit: regenerate with  train/.venv/Scripts/python.exe compiler/compile.py --model {graph.name}
+// Do not edit: regenerate with  train/.venv/Scripts/python.exe {regen}
 //
-{chr(10).join('//   ' + l for l in graph.describe().splitlines())}
+{desc}
 #include <stdint.h>
 #include "ref_infer.h"
 
 const char ref_model_name[] = "mafc:{graph.name}";
-const int ref_n_stages = {len(stage_nodes)};
+const int ref_n_stages = {len(stage_names)};
 const char *const ref_stage_names[REF_MAX_STAGES] = {{{names}}};
 uint32_t ref_stage_cycles[REF_MAX_STAGES];
 
 // ---- activations: static, fixed addresses ----
-static int32_t ch_a[{plane}], ch_b[{plane}];   // per-channel planes of the fused conv segment
+static int32_t ch_a[{plane}], ch_b[{plane}];   // per-channel planes of the fused conv segment (core 0)
 static int32_t feat[{feat_ch * n_ch}];          // conv segment output, CHW
 static int32_t acc[{tail_max}];
 static int8_t act[{tail_max}];
 
 // ---- weights ----
 '''
-    assert len(stage_nodes) <= 16
-    return (head + ''.join(weights) + '\n// ---- layers ----\n' + '\n'.join(funcs) +
+    assert len(stage_names) <= 16
+    return (head + ''.join(weights) + '\n// ---- layers ----\n' + '\n'.join(funcs) + dual +
             '\nuint32_t ref_infer(const int8_t img[REF_IMG_PIXELS], int32_t logits[REF_N_CLASSES]) {\n' +
             '\n'.join(body) + '\n}\n')
 
 
-def write(graph, out_dir, source=''):
+def write(graph, out_dir, source='', cores=1):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    c_path = out_dir / f'mafc_{graph.name}.c'
-    c_path.write_text(generate(graph, source), encoding='utf-8', newline='\n')
+    c_path = out_dir / (f'mafc_{graph.name}.c' if cores == 1 else f'mafc_{graph.name}_dual.c')
+    c_path.write_text(generate(graph, source, cores), encoding='utf-8', newline='\n')
     (out_dir / f'mafc_{graph.name}.ir.json').write_text(graph.to_json(), encoding='utf-8', newline='\n')
     return c_path

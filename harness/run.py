@@ -200,8 +200,13 @@ def main():
     if stages and sum(stages.values()) > 0:
         total = sum(stages.values())
         print('  stages (image 0):  ' + ', '.join(f'{k} {v} ({v / total * 100:.0f}%)' for k, v in stages.items()))
-        sp = Path(args.csv).with_name(Path(args.csv).stem + '_stages.csv')
+        # one file per stage set, so columns always line up (dual-core builds add a 'join' stage)
+        suffix = '_stages_dual.csv' if 'join' in stages else '_stages.csv'
+        sp = Path(args.csv).with_name(Path(args.csv).stem + suffix)
         new_s = not sp.exists()
+        if not new_s:
+            with open(sp, newline='') as f:
+                assert next(csv.reader(f))[3:] == list(stages), f'stage columns of {sp} differ from this build'
         with open(sp, 'a', newline='') as f:
             w = csv.writer(f)
             if new_s:

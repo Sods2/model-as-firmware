@@ -39,6 +39,29 @@ At v0 the conv stack is about 70% of the cycles and fc1 about 20%. Candidates, b
 3. **fc1 ternary (about 255k cycles from SRAM, about 8 per weight):** this is idea A. Candidates: weights as code (the add/subtract lists are about 15k non-zero instructions, too big for flash bandwidth?), a 2-bitplane format (positive and negative masks per 32 inputs), lookup tables over groups of activations (idea E), or sparse index lists for the z70/z90 models.
 4. **Fixing the dw1 code-generation regression** (see above), plus the int8 → int16 widening.
 
+## v1: second core (`compile.py --cores 2`, build `mafc_v1_dual`)
+
+**Design.**
+- **Conv segment:** core 1 takes channels 0–39, core 0 takes 40–79. Each core has its own two planes and writes its own slice of `feat`, so there's no sharing to synchronize except the start and the end.
+- **Big linear layers:** fc1 (30.7k weights) and fc2 (6.1k) are split by output rows. fc3 (640 weights, under `PAR_MIN_MACS` = 4096) stays on core 0. `relu_norm` stays on core 0, because it needs the whole vector.
+- **Handshake:** core 1 runs a job loop on the SIO FIFO: pop a job number, `__dmb()`, run, `__dmb()`, push the number back. Core 0 does `start_job(k)`, its own share, `join_job()`. That's 3 handshakes per image.
+- **Start-up:** `ref_init()` (a new optional hook, called once by `pico_main.c` at boot) launches core 1, so the launch cost never lands in a timed inference.
+- **PC build:** `start_job()` just runs core 1's share inline, so the host check covers exactly the same partitioning. The PC run was bit-exact on 10k images for all three models.
+- **Profiling:** stages are core 0's own work plus a `join` stage (time spent waiting for core 1 after the conv segment). Linear stages are wall time, waits included.
+
+**Profile** (tern80, image 0, profiling builds; v0 numbers in brackets):
+
+| Stage | flash | SRAM |
+|---|---|---|
+| conv segment (core 0's half) | 562k [1,011k] | 534k [1,014k] |
+| join (waiting for core 1) | 21k | 12k |
+| fc1 | 215k [302k] | 139k [253k] |
+| fc2 + fc3 | 75k [96k] | 40k [67k] |
+| **total** | **880k = 5.86 ms** [1.41M] | **724k = 4.83 ms** [1.33M] |
+
+- **From SRAM, close to the ideal 2x:** 1.84x overall. The conv segment is 1.90x and fc1 1.83x. The join wait (12k cycles, 1.6%) shows the two halves are well balanced; core 1 is slightly slower, likely from SRAM bank contention.
+- **From flash, the second core helps less:** 1.60x overall, and fc1 only 1.40x. Both cores now pull fc1's 6 KB of ternary words and both cores' code through the one 16 KB XIP cache. Flash bandwidth and cache sharing are the limit again, which is the project's premise once more. The best dual-core setup runs from SRAM.
+
 ## Lessons
 
 - The worst-case bound analysis belongs in the compiler: it decides data types (int16 vs int32) and proves no overflow. The current interpreter only *asserts* int32 safety at run time.

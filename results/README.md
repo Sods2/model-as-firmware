@@ -3,7 +3,9 @@
 | File | What |
 |---|---|
 | `phase0.csv` | One row per timed run (10k MNIST test images, profiling off), written by `harness/run.py` |
+| `phase1.csv` | Phase 1 timed runs (mafc compiler builds) |
 | `profile.csv`, `profile_stages.csv` | Profiling builds (200 images, stage counters on). Stage cycles are for test image 0 |
+| `profile_stages_dual.csv` | The same for dual-core builds (extra `join` stage: core 0 waiting for core 1) |
 
 ## Columns (`phase0.csv`)
 
@@ -47,3 +49,14 @@ The mafc-generated C. Same integer arithmetic, bit-exact with the golden model o
 | mafc_v0 (flash) | tern80z90 | 99.51% | 9.22 ms | 1.10x | n/a | 46.4 KB | 7.2 KB |
 
 Stage profiles are in `profile_stages.csv` (`mafc_v0_prof`, `mafc_v0_ram_prof` rows); analysis in [notes/compiler.md](../notes/compiler.md).
+
+### v1: two cores (`mafc_v1_dual`)
+
+| Build | Model | Accuracy | Latency | vs mafc v0 | vs CMSIS-NN (same memory) | Flash | RAM |
+|---|---|---|---|---|---|---|---|
+| mafc_v1_dual (flash) | tern80 | 99.47% | 5.80 ms | 1.61x | 3.23x | 49.1 KB | 10.8 KB |
+| mafc_v1_dual (SRAM) | tern80 | 99.47% | **4.80 ms** | 1.84x | **3.02x** | 49.0 KB | 59.8 KB |
+| mafc_v1_dual (flash) | tern80z70 | 99.47% | 5.79 ms | 1.60x | n/a | 49.1 KB | 10.8 KB |
+| mafc_v1_dual (flash) | tern80z90 | 99.51% | 5.78 ms | 1.60x | n/a | 49.1 KB | 10.8 KB |
+
+Bit-exact on all 10,000 images. From SRAM the second core gives close to the ideal 2x (1.84x). From flash it gives less (1.61x), because both cores share the 16 KB XIP cache. The stage profile has an extra `join` column, so it's in `profile_stages_dual.csv`.

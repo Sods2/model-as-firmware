@@ -2,7 +2,7 @@
 # Build, flash and measure any set of builds on the Pico 2 (Git Bash, from the repo root).
 #
 #   harness/measure.sh <profile|final> <csv> <build:model:mem> ...
-#     build  ref_c | cmsis_nn | mafc
+#     build  ref_c | cmsis_nn | mafc | mafc2 (mafc, dual-core)
 #     model  tern80 | tern80z70 | tern80z90
 #     mem    flash | ram          (ram = copy_to_ram: code and weights in SRAM)
 #
@@ -31,17 +31,20 @@ flash() {
 
 for spec in "$@"; do
   IFS=: read -r build model mem <<< "$spec"
+  extra=
   case $build in
     ref_c)    src=firmware/baselines/ref_c;    golden=ref ;;
     cmsis_nn) src=firmware/baselines/cmsis_nn; golden=s8 ;;
-    mafc)     src=firmware/rp2350/mafc;        golden=ref ;;
+    mafc)     src=firmware/rp2350/mafc;        golden=ref; extra=-DDUAL_CORE=OFF ;;
+    mafc2)    src=firmware/rp2350/mafc;        golden=ref; extra=-DDUAL_CORE=ON ;;
     *) echo "unknown build $build"; exit 1 ;;
   esac
-  dir=$src/build-$model-$mem$SUFFIX
+  dir=$src/build-$build-$model-$mem$SUFFIX
   ram=OFF; [ "$mem" = ram ] && ram=ON
-  cmake -S $src -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODEL=$model -DRUN_FROM_RAM=$ram -DPROFILE_STAGES=$PROF >/dev/null
+  cmake -S $src -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODEL=$model -DRUN_FROM_RAM=$ram -DPROFILE_STAGES=$PROF ${extra:-} >/dev/null
   ninja -C "$dir" >/dev/null
-  flash "$dir/$build.uf2"
+  target=${build%2}   # mafc2 builds the mafc target
+  flash "$dir/$target.uf2"
   $PY harness/run.py --model $model --target pico --port "$PORT" --golden $golden --n $N \
-      --elf "$dir/$build.elf" --csv "$CSV" | grep -v -E '^  [0-9]+/[0-9]+ '
+      --elf "$dir/$target.elf" --csv "$CSV" | grep -v -E '^  [0-9]+/[0-9]+ '
 done

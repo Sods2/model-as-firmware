@@ -2,6 +2,14 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 11 Nov 2026: Phase 1, compiler v1 step 1, second core
+
+- `compile.py --cores 2` splits the conv channels (40/40) and fc1/fc2 rows across both M33 cores. Core 1 runs a job loop on the SIO FIFO with DMB fences, started once by a new `ref_init()` boot hook. The PC build runs core 1's share inline, so the same split is verified there.
+- Bit-exact on 10k images (PC and board) for tern80, z70 and z90.
+- Timed: **4.80 ms from SRAM** (v0: 8.83 ms, so 1.84x) and **5.80 ms from flash** (v0: 9.33 ms, so 1.61x). Against CMSIS-NN in the same memory that's **3.02x** (SRAM) and 3.23x (flash). Against the hand-written ref_c from SRAM it's 1.98x.
+- Profile: core 0 waits only 12k cycles (SRAM) for core 1 at the join, so the halves are balanced. From flash, fc1 gains just 1.40x: both cores share the 16 KB XIP cache. That's the flash-bandwidth limit again.
+- `run.py` now writes dual-core stage rows to `*_stages_dual.csv` and checks that columns match. Before this, mixed stage sets would have produced misaligned rows.
+
 ## 11 Nov 2026: Phase 1, compiler v0 (`compiler/mafc`, branch `phase1-compiler-v0`)
 
 - Built the compiler pipeline: a front end that reads the exported header, an IR with exact integer semantics, a numpy interpreter, and an RP2350 C back end. The back end emits one function per layer with constant sizes, packed weights as data, static buffers, and channel fusion. See [compiler.md](compiler.md) and [compiler/README.md](../compiler/README.md).

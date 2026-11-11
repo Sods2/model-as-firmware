@@ -4,6 +4,7 @@ Working notes kept for future reference: what was looked into, what was found, a
 
 | Note | What's in it |
 |---|---|
+| [FINDINGS.md](FINDINGS.md) | **Start here for analysis:** all conclusions so far (F1–F11) with evidence, headline numbers, open questions, caveats |
 | [LOG.md](LOG.md) | Dated lab log: what was done each session, with key numbers |
 | [bitnetmcu-integer-inference.md](bitnetmcu-integer-inference.md) | How BitNetMCU's integer inference works (packing formats, requantization), how our C reference and golden model relate to it, licence |
 | [pico-toolchain.md](pico-toolchain.md) | Building, flashing and talking to the Pico 2 from this PC: paths, commands, quirks |
