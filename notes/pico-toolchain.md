@@ -59,3 +59,12 @@ PT=~/.pico-sdk/picotool/2.3.1/picotool/picotool.exe
 
 - The RP2040 had XIP cache counters (`XIP_CTR_HIT`, `XIP_CTR_ACC`). The **RP2350 register headers in SDK 2.3.1 have none** (checked 11 Nov 2026), so the `flash_read_kb` metric can't simply be read from a counter.
 - Options still to check: work out bytes read from the weight layout and the 16 KB cache (analytically); the QMI or bus-performance counters in the RP2350 datasheet; or compare the same build with `RUN_FROM_RAM` on and off, as the CMSIS-NN fc1 experiment already did (524k vs 71k cycles).
+
+## Gotcha: only one thing can use the board, and Git Bash `ps` doesn't see Windows processes
+
+- COM3 can only be opened by one process. A second `run.py` (or the live-view `bridge.py`) fails with `could not open port 'COM3': PermissionError(13, 'Access is denied.')`.
+- Two `measure.sh` runs at once also collide on the build folders (`ninja: error: failed recompaction: Permission denied`).
+- To see what holds the board, use PowerShell, not Git Bash `ps`, which only lists MSYS processes:
+  `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'run.py|bridge.py' } | Select ProcessId,CommandLine"`
+- Happened on 11 Nov 2026: a `measure.sh` started with `&` from a tool shell looked dead to `ps` but kept running, flashing and measuring. Start long runs as real background jobs and check them with the command above before starting another.
+- Don't use that check inside a shell loop that waits for `run.py` to finish: the loop's own command line contains the text `run.py`, so it matches itself and never ends. This happened on 11 Nov 2026, and a watcher loop hung for hours. Exclude the current process (`$_.ProcessId -ne $PID` doesn't help, because the match is the parent bash), match `python.exe` with `$_.Name -eq 'python.exe'`, or just wait for the CSV rows.

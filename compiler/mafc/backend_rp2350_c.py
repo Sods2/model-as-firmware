@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from . import __version__
+from .bounds import bounds, fits_int16
 
 TERNARY_DIGIT = {1: 0, -1: 1, 0: 2}   # base-3 digit for each weight value (matches the decoder below)
 
@@ -76,35 +77,42 @@ def c_array(ctype, name, vals, fmt='{}', per_line=16):
 
 # --------------------------------------------------------------------------- per-op code
 
-def emit_conv_ch(node, in_ctype):
+def relu_shift(v, sh, ctype):
+    """ReLU then >> sh, written clamp-first. Same result as `v < 0 ? 0 : v >> sh` (0 >> sh == 0), but gcc
+    compiles it branch-free (`bic r, r, r, asr #31`). The select form became a branch per output when the
+    store was int16 (notes/compiler.md, "Why conv1 got slower")."""
+    return f'({ctype})(({v} > 0 ? {v} : 0) >> {sh})'
+
+
+def emit_conv_ch(node, in_ctype, out_ctype='int32_t'):
     """One channel of a 3x3 valid conv + ReLU + shift. in: one n x n plane, out: (n-2) x (n-2)."""
     n = node.in_shape[1]
     m = n - 2
     sh = node.attrs['shift']
     return f'''// {node.name}: conv3x3 ({node.attrs['mode']}), one channel, {n}x{n} -> {m}x{m}, ReLU, >> {sh}
-static inline void {node.name}_ch(const {in_ctype} *restrict in, const int8_t *restrict k, int32_t *restrict out) {{
+static inline void {node.name}_ch(const {in_ctype} *restrict in, const int8_t *restrict k, {out_ctype} *restrict out) {{
     const int32_t k0 = k[0], k1 = k[1], k2 = k[2], k3 = k[3], k4 = k[4], k5 = k[5], k6 = k[6], k7 = k[7], k8 = k[8];
     for (int y = 0; y < {m}; y++) {{
         const {in_ctype} *r0 = in + y * {n}, *r1 = r0 + {n}, *r2 = r1 + {n};
-        int32_t *o = out + y * {m};
+        {out_ctype} *o = out + y * {m};
         for (int x = 0; x < {m}; x++) {{
             int32_t s = k0 * r0[x] + k1 * r0[x + 1] + k2 * r0[x + 2]
                       + k3 * r1[x] + k4 * r1[x + 1] + k5 * r1[x + 2]
                       + k6 * r2[x] + k7 * r2[x + 1] + k8 * r2[x + 2];
-            o[x] = s < 0 ? 0 : (s >> {sh});
+            o[x] = {relu_shift('s', sh, out_ctype)};
         }}
     }}
 }}
 '''
 
 
-def emit_pool_ch(node):
+def emit_pool_ch(node, in_ctype='int32_t', out_ctype='int32_t'):
     n = node.in_shape[1]
     m = n // 2
     return f'''// {node.name}: maxpool 2x2, one channel, {n}x{n} -> {m}x{m}
-static inline void {node.name}_ch(const int32_t *restrict in, int32_t *restrict out) {{
+static inline void {node.name}_ch(const {in_ctype} *restrict in, {out_ctype} *restrict out) {{
     for (int y = 0; y < {m}; y++) {{
-        const int32_t *r0 = in + 2 * y * {n}, *r1 = r0 + {n};
+        const {in_ctype} *r0 = in + 2 * y * {n}, *r1 = r0 + {n};
         for (int x = 0; x < {m}; x++) {{
             int32_t a = r0[2 * x], b = r0[2 * x + 1], c = r1[2 * x], d = r1[2 * x + 1];
             int32_t ab = a > b ? a : b, cd = c > d ? c : d;
@@ -112,6 +120,69 @@ static inline void {node.name}_ch(const int32_t *restrict in, int32_t *restrict 
         }}
     }}
 }}
+'''
+
+
+def pack_smlad_kernel(k):
+    """[C, 3, 3] int8 -> [C, 6] uint32: per kernel row r, (k[r][1] << 16) | (k[r][0] & 0xFFFF), then k[r][2] (low half)."""
+    k = k.astype(np.int64)
+    pairs = ((k[:, :, 1] & 0xFFFF) << 16) | (k[:, :, 0] & 0xFFFF)
+    singles = k[:, :, 2] & 0xFFFF
+    return np.concatenate([pairs, singles], axis=1)
+
+
+def emit_conv_ch_smlad(node, out_ctype):
+    """One channel of a depthwise 3x3 conv on an int16 plane, two outputs per step with SMLAD.
+    For outputs x and x+1 of one kernel row r (inputs i0..i3 = in[x..x+3]):
+      s0 += k0*i0 + k1*i1  (SMLAD on the word (i0, i1))   + k2*i2  (SMLABB, low half of (i2, i3))
+      s1 += k0*i1 + k1*i2  (SMLAD on the repacked (i1, i2)) + k2*i3  (SMLATB, high half of (i2, i3))
+    Exact: the inputs are proven to fit int16 and the partial sums int32 (bounds.py)."""
+    n = node.in_shape[1]
+    m = n - 2
+    sh = node.attrs['shift']
+    assert n % 2 == 0 and m % 2 == 0, 'SMLAD kernel needs an even plane width (aligned word pairs)'
+    rows = []
+    for r in range(3):
+        rows.append(f'''            {{
+                uint32_t p, q;
+                memcpy(&p, in + (y + {r}) * {n} + x, 4);
+                memcpy(&q, in + (y + {r}) * {n} + x + 2, 4);
+                s0 = SMLAD(p, kp[{r}], s0);
+                s0 = SMLABB(q, kp[{3 + r}], s0);
+                s1 = SMLAD((p >> 16) | (q << 16), kp[{r}], s1);
+                s1 = SMLATB(q, kp[{3 + r}], s1);
+            }}''')
+    body = '\n'.join(rows)
+    return f'''// {node.name}: conv3x3 (depthwise), one channel, int16 {n}x{n} -> {m}x{m}, ReLU, >> {sh}; SMLAD, 2 outputs per step
+static inline void {node.name}_ch(const int16_t *restrict in, const uint32_t *restrict kp, {out_ctype} *restrict out) {{
+    for (int y = 0; y < {m}; y++) {{
+        {out_ctype} *o = out + y * {m};
+        for (int x = 0; x < {m}; x += 2) {{
+            int32_t s0 = 0, s1 = 0;
+{body}
+            o[x] = {relu_shift('s0', sh, out_ctype)};
+            o[x + 1] = {relu_shift('s1', sh, out_ctype)};
+        }}
+    }}
+}}
+'''
+
+
+SIMD_HELPERS = '''
+// ---- DSP helpers: SMLAD/SMLABB/SMLATB on the M33, plain C on the PC (same results) ----
+#include <string.h>
+#if defined(__ARM_FEATURE_DSP) && __ARM_FEATURE_DSP
+#include <arm_acle.h>
+#define SMLAD(a, b, acc)  __smlad((a), (b), (acc))
+#define SMLABB(a, b, acc) __smlabb((int32_t)(a), (int32_t)(b), (acc))
+#define SMLATB(a, b, acc) __smlatb((int32_t)(a), (int32_t)(b), (acc))
+#else
+static inline int32_t SMLAD(uint32_t a, uint32_t b, int32_t acc) {
+    return acc + (int16_t)a * (int16_t)b + (int16_t)(a >> 16) * (int16_t)(b >> 16);
+}
+static inline int32_t SMLABB(uint32_t a, uint32_t b, int32_t acc) { return acc + (int16_t)a * (int16_t)b; }
+static inline int32_t SMLATB(uint32_t a, uint32_t b, int32_t acc) { return acc + (int16_t)(a >> 16) * (int16_t)b; }
+#endif
 '''
 
 
@@ -231,7 +302,7 @@ def channel_fused_prefix(nodes):
 PAR_MIN_MACS = 4096   # linear layers smaller than this stay on core 0 (the handshake would cost more)
 
 
-def generate(graph, source='', cores=1):
+def generate(graph, source='', cores=1, simd=False):
     """cores=2: the channel-fused conv segment and the big linear layers are split across both M33 cores.
     Core 1 runs a job loop fed by the SIO FIFO; on the PC build the core-1 jobs simply run inline first."""
     assert cores in (1, 2)
@@ -255,14 +326,38 @@ def generate(graph, source='', cores=1):
                   [nd.name for nd in rest if nd.op == 'linear']
     stage_id = {n: k for k, n in enumerate(stage_names)}
 
-    weights, funcs = [], []
-    for i in seg:
+    # Typed plan for the fused segment. With simd, a tensor is stored as int16 when bounds.py proves it
+    # fits, and a depthwise conv reading an int16 plane uses the SMLAD kernel. The last op writes feat (int32).
+    bd = bounds(graph) if simd else {}
+    plan = []          # (node, in_ctype, out_ctype, kernel)
+    in_t = 'int8_t'
+    for j, i in enumerate(seg):
         nd = nodes[i]
+        last = j == len(seg) - 1
+        out_t = 'int16_t' if simd and not last and fits_int16(bd[nd.name]) else 'int32_t'
+        if nd.op == 'maxpool2':
+            out_t = in_t if not last else 'int32_t'
+        kern = 'plain'
+        if (simd and nd.op == 'conv3x3' and nd.attrs['mode'] == 'depthwise' and in_t == 'int16_t'
+                and nd.in_shape[1] % 2 == 0 and (nd.in_shape[1] - 2) % 2 == 0):
+            assert bd[nd.name][2] <= 2**31 - 1
+            kern = 'smlad'
+        plan.append((nd, in_t, out_t, kern))
+        in_t = out_t
+    uses16 = any(o == 'int16_t' for _, _, o, _ in plan)
+
+    weights, funcs = [], []
+    for nd, it, ot, kern in plan:
         if nd.op == 'conv3x3':
-            weights.append(c_array('int8_t', f'{nd.name}_w', nd.weights.reshape(-1)))
-            funcs.append(emit_conv_ch(nd, 'int8_t' if nd.attrs['mode'] == 'broadcast' else 'int32_t'))
+            if kern == 'smlad':
+                weights.append(c_array('uint32_t', f'{nd.name}_kp', pack_smlad_kernel(nd.weights), '0x{:08X}', 6))
+                funcs.append(emit_conv_ch_smlad(nd, ot))
+            else:
+                weights.append(c_array('int8_t', f'{nd.name}_w', nd.weights.reshape(-1)))
+                funcs.append(emit_conv_ch(nd, it, ot) if simd else
+                             emit_conv_ch(nd, 'int8_t' if nd.attrs['mode'] == 'broadcast' else 'int32_t'))
         else:
-            funcs.append(emit_pool_ch(nd))
+            funcs.append(emit_pool_ch(nd, it, ot) if simd else emit_pool_ch(nd))
     for nd in rest:
         if nd.op == 'relu_norm':
             funcs.append(emit_relu_norm(nd))
@@ -273,13 +368,21 @@ def generate(graph, source='', cores=1):
 
     tail_max = max([int(np.prod(nd.out_shape)) for nd in rest if nd.op in ('relu_norm', 'linear')] + [feat_ch * n_ch])
 
-    def seg_loop(lo, hi, pa, pb, prof, indent='    '):
+    def seg_loop(lo, hi, pa, pb, prof, indent='    ', p16=None):
+        """p16: names of the two int16 planes for this core (needed when the plan uses int16)."""
         out = [f'{indent}for (int c = {lo}; c < {hi}; c++) {{']
-        cur, bufs = 'img', [pa, pb]
-        for j, i in enumerate(seg):
-            nd = nodes[i]
-            dst = f'feat + {feat_ch} * c' if j == len(seg) - 1 else bufs[j % 2]
-            if nd.op == 'conv3x3':
+        cur = 'img'
+        pools = {'int32_t': [pa, pb], 'int16_t': p16 or []}
+        used_planes.update(b for b in [pa, pb] + (p16 or []))
+        for j, (nd, it, ot, kern) in enumerate(plan):
+            if j == len(plan) - 1:
+                dst = f'feat + {feat_ch} * c'
+            else:
+                dst = next(b for b in pools[ot] if b != cur)
+                used_dst.add(dst)
+            if nd.op == 'conv3x3' and kern == 'smlad':
+                out.append(f'{indent}    {nd.name}_ch({cur}, {nd.name}_kp + 6 * c, {dst});')
+            elif nd.op == 'conv3x3':
                 out.append(f'{indent}    {nd.name}_ch({cur}, {nd.name}_w + 9 * c, {dst});')
             else:
                 out.append(f'{indent}    {nd.name}_ch({cur}, {dst});')
@@ -293,13 +396,16 @@ def generate(graph, source='', cores=1):
     dual = ''
     job_of = {}
     body = ['    PROF_BEGIN();']
+    used_planes, used_dst = set(), set()
+    p16_0 = ['ch16_a', 'ch16_b'] if uses16 else None
+    p16_1 = ['ch1_16_a', 'ch1_16_b'] if uses16 else None
     if cores == 1:
-        body += seg_loop(0, n_ch, 'ch_a', 'ch_b', True)
+        body += seg_loop(0, n_ch, 'ch_a', 'ch_b', True, p16=p16_0)
     else:
         # core-1 jobs: 1 = its half of the conv segment (channels 0..half), 2.. = the upper half of the rows
         # of each parallel linear layer
         jobs = ['        case 1: {', '            const int8_t *img = job_img;'] + \
-               seg_loop(0, half, 'ch1_a', 'ch1_b', False, '            ') + ['            break;', '        }']
+               seg_loop(0, half, 'ch1_a', 'ch1_b', False, '            ', p16=p16_1) + ['            break;', '        }']
         for nd in rest:
             if nd.name in par_linear:
                 k = len(job_of) + 2
@@ -313,7 +419,7 @@ def generate(graph, source='', cores=1):
 // transfer is fenced with a DMB so the other core sees every buffer write made before it.
 static const int8_t *volatile job_img;
 static int32_t ch1_a[{plane}], ch1_b[{plane}];   // core 1's own per-channel planes
-
+{f"static int16_t ch1_16_a[{plane}] __attribute__((aligned(4))), ch1_16_b[{plane}] __attribute__((aligned(4)));  // core 1's int16 planes" + chr(10) if uses16 else ""}
 static void run_job(uint32_t job) {{
     switch (job) {{
 {jobs_text}
@@ -343,7 +449,7 @@ static inline void start_job(uint32_t job) {{ run_job(job); }}
 static inline void join_job(void) {{}}
 #endif
 '''
-        body += ['    job_img = img;', '    start_job(1);'] + seg_loop(half, n_ch, 'ch_a', 'ch_b', True) + \
+        body += ['    job_img = img;', '    start_job(1);'] + seg_loop(half, n_ch, 'ch_a', 'ch_b', True, p16=p16_0) + \
                 ['    join_job();', f'    PROF_STAGE({stage_id["join"]});']
     src = 'feat'
     for nd in rest:
@@ -367,9 +473,9 @@ static inline void join_job(void) {{}}
         '    return best;',
     ]
 
-    variant = 'v0 (one core' if cores == 1 else 'v1 (two cores'
+    variant = ('v0 (one core' if cores == 1 else 'v1 (two cores') + (', SMLAD on int16 planes' if simd else '')
     names = ', '.join(f'"{n}"' for n in stage_names)
-    regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '')
+    regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '') + (' --simd' if simd else '')
     desc = '\n'.join('//   ' + l for l in graph.describe().splitlines())
     head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c {variant}, all weights as packed data).
 // Source: {source}
@@ -386,22 +492,38 @@ uint32_t ref_stage_cycles[REF_MAX_STAGES];
 
 // ---- activations: static, fixed addresses ----
 static int32_t ch_a[{plane}], ch_b[{plane}];   // per-channel planes of the fused conv segment (core 0)
-static int32_t feat[{feat_ch * n_ch}];          // conv segment output, CHW
+{f"static int16_t ch16_a[{plane}] __attribute__((aligned(4))), ch16_b[{plane}] __attribute__((aligned(4)));  // int16 planes (bound-proven)" + chr(10) if uses16 else ""}static int32_t feat[{feat_ch * n_ch}];          // conv segment output, CHW
 static int32_t acc[{tail_max}];
 static int8_t act[{tail_max}];
 
 // ---- weights ----
 '''
     assert len(stage_names) <= 16
+    if simd:
+        for decl_old, names, ctype, extra in (
+                (f'static int32_t ch_a[{plane}], ch_b[{plane}];', ['ch_a', 'ch_b'], 'int32_t', ''),
+                (f'static int32_t ch1_a[{plane}], ch1_b[{plane}];', ['ch1_a', 'ch1_b'], 'int32_t', ''),
+                (f'static int16_t ch16_a[{plane}] __attribute__((aligned(4))), ch16_b[{plane}] __attribute__((aligned(4)));',
+                 ['ch16_a', 'ch16_b'], 'int16_t', ' __attribute__((aligned(4)))'),
+                (f'static int16_t ch1_16_a[{plane}] __attribute__((aligned(4))), ch1_16_b[{plane}] __attribute__((aligned(4)));',
+                 ['ch1_16_a', 'ch1_16_b'], 'int16_t', ' __attribute__((aligned(4)))')):
+            keep = [n for n in names if n in used_dst]
+            new = f'static {ctype} ' + ', '.join(f'{n}[{plane}]{extra}' for n in keep) + ';' if keep else '// (unused plane pair removed)'
+            head = head.replace(decl_old, new)
+            dual = dual.replace(decl_old, new)
+        bnote = '\n'.join(f'//   {nd.name}: values in [{bd[nd.name][0]}, {bd[nd.name][1]}], |partial sums| <= {bd[nd.name][2]}'
+                          f' -> {ot}{" (SMLAD)" if kern == "smlad" else ""}' for nd, it, ot, kern in plan)
+        head = head.replace('// ---- weights ----', '// ---- proven value ranges (compiler/mafc/bounds.py) ----\n' + bnote +
+                            '\n' + SIMD_HELPERS + '\n// ---- weights ----')
     return (head + ''.join(weights) + '\n// ---- layers ----\n' + '\n'.join(funcs) + dual +
             '\nuint32_t ref_infer(const int8_t img[REF_IMG_PIXELS], int32_t logits[REF_N_CLASSES]) {\n' +
             '\n'.join(body) + '\n}\n')
 
 
-def write(graph, out_dir, source='', cores=1):
+def write(graph, out_dir, source='', cores=1, simd=False):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    c_path = out_dir / (f'mafc_{graph.name}.c' if cores == 1 else f'mafc_{graph.name}_dual.c')
-    c_path.write_text(generate(graph, source, cores), encoding='utf-8', newline='\n')
+    c_path = out_dir / (f'mafc_{graph.name}' + ('_dual' if cores == 2 else '') + ('_simd' if simd else '') + '.c')
+    c_path.write_text(generate(graph, source, cores, simd), encoding='utf-8', newline='\n')
     (out_dir / f'mafc_{graph.name}.ir.json').write_text(graph.to_json(), encoding='utf-8', newline='\n')
     return c_path

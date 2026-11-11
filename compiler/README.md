@@ -12,6 +12,7 @@ train/export/<model>.h ──front end──► IR (integer ops + integer weight
 |---|---|
 | `mafc/ir.py` | The IR: `Graph` of `Node`s. Ops: `input`, `conv3x3` (broadcast/depthwise, ReLU, `>> shift`), `maxpool2`, `relu_norm`, `linear` (ternary / int4sym / int8), `argmax`. The docstring defines each op's exact arithmetic |
 | `mafc/frontend_bitnetmcu.py` | BitNetMCU-exported header -> IR (CNNMNIST layout) |
+| `mafc/bounds.py` | Worst-case value range of every tensor (exact interval analysis); decides int16 vs int32 |
 | `mafc/interp.py` | Numpy interpreter of the IR, the definition of "correct" for every back end |
 | `mafc/backend_rp2350_c.py` | IR -> C for the RP2350. Implements `ref_infer()` so the Phase 0 harness and firmware apply unchanged |
 | `compile.py` | Command line |
@@ -46,8 +47,19 @@ The back end also round-trips every packed weight array through a decoder before
 
 `compile.py --cores 2` writes `gen/mafc_<model>_dual.c`. Build it with `-DDUAL_CORE=ON`, or as `mafc2` in `harness/measure.sh`. The conv channels and the big linear layers (at least 4,096 weights) are split between the two M33 cores. Core 1 runs a job loop on the SIO FIFO, started once at boot by `ref_init()`. On the PC the core-1 share runs inline, so the same split is checked there. Design and numbers are in [notes/compiler.md](../notes/compiler.md).
 
+## Back end v1: SMLAD (`--simd`)
+
+`compile.py --simd` (combine with `--cores 2`) writes `gen/mafc_<model>[_dual]_simd.c`. Build it with `-DSIMD=ON`, or as `mafc_s` / `mafc2_s` in `harness/measure.sh`.
+
+- `mafc/bounds.py` proves each tensor's value range over all int8 inputs. Tensors that fit are stored as int16.
+- Depthwise convs that read an int16 plane use an SMLAD kernel (two outputs per step, weights pre-packed at compile time).
+- The proven ranges are written as a comment at the top of the generated file.
+- On the PC the DSP intrinsics fall back to plain C with identical results.
+
+All builds write the conv ReLU clamp-then-shift (`relu_shift()`): `(s > 0 ? s : 0) >> sh`, never `s < 0 ? 0 : s >> sh`. The results are the same, but the select form made gcc emit branches or IT blocks and cost conv layers 10–20% (FINDINGS F14). After any back-end change, check the hot loops' disassembly for branches.
+
 ## Limits of v0
 
 - Front end: the BitNetMCU CNNMNIST header layout only. A QONNX or `.pth` front end comes later.
 - Back end: 1x16x16 int8 input, a per-channel conv prefix, and a `linear -> 10` + `argmax` end. These match the harness protocol.
-- No SIMD and no weights as code yet. Those are the next v1 steps and idea A (see `notes/compiler.md`).
+- SIMD only for depthwise convs on int16 planes so far (conv1 next); no weights as code yet (idea A). See `notes/compiler.md`.

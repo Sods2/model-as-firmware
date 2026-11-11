@@ -2,12 +2,13 @@
 # Build, flash and measure any set of builds on the Pico 2 (Git Bash, from the repo root).
 #
 #   harness/measure.sh <profile|final> <csv> <build:model:mem> ...
-#     build  ref_c | cmsis_nn | mafc | mafc2 (mafc, dual-core)
+#     build  ref_c | cmsis_nn | mafc | mafc2 (dual-core) | mafc_s (SMLAD) | mafc2_s (dual-core + SMLAD)
 #     model  tern80 | tern80z70 | tern80z90
 #     mem    flash | ram          (ram = copy_to_ram: code and weights in SRAM)
 #
 #   profile: 200 images, stage counters on;  final: 10k images, counters off.
 #   e.g.  harness/measure.sh final results/phase1.csv mafc:tern80:flash mafc:tern80:ram
+#   NOTES="..." harness/measure.sh ...   puts a label in the CSV's notes column
 set -euo pipefail
 MODE=$1; CSV=$2; shift 2
 PORT=${PORT:-COM3}
@@ -35,16 +36,18 @@ for spec in "$@"; do
   case $build in
     ref_c)    src=firmware/baselines/ref_c;    golden=ref ;;
     cmsis_nn) src=firmware/baselines/cmsis_nn; golden=s8 ;;
-    mafc)     src=firmware/rp2350/mafc;        golden=ref; extra=-DDUAL_CORE=OFF ;;
-    mafc2)    src=firmware/rp2350/mafc;        golden=ref; extra=-DDUAL_CORE=ON ;;
+    mafc)     src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=OFF -DSIMD=OFF" ;;
+    mafc2)    src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=ON -DSIMD=OFF" ;;
+    mafc_s)   src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=OFF -DSIMD=ON" ;;
+    mafc2_s)  src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=ON -DSIMD=ON" ;;
     *) echo "unknown build $build"; exit 1 ;;
   esac
+  case $build in mafc*) target=mafc ;; *) target=$build ;; esac
   dir=$src/build-$build-$model-$mem$SUFFIX
   ram=OFF; [ "$mem" = ram ] && ram=ON
   cmake -S $src -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODEL=$model -DRUN_FROM_RAM=$ram -DPROFILE_STAGES=$PROF ${extra:-} >/dev/null
   ninja -C "$dir" >/dev/null
-  target=${build%2}   # mafc2 builds the mafc target
   flash "$dir/$target.uf2"
   $PY harness/run.py --model $model --target pico --port "$PORT" --golden $golden --n $N \
-      --elf "$dir/$target.elf" --csv "$CSV" | grep -v -E '^  [0-9]+/[0-9]+ '
+      --elf "$dir/$target.elf" --csv "$CSV" --notes "${NOTES:-}" | grep -v -E '^  [0-9]+/[0-9]+ '
 done

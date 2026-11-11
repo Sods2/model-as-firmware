@@ -16,7 +16,7 @@ Feasible as a proof of concept, but expect a solid improvement over a standard e
 
 ## Status
 
-*As of 11 Nov 2026.* Phase 0 steps 0–6 are done. Gate 0 is met on correctness and baselines; only the energy measurement (step 2b) is left. **Phase 1 has started:** the compiler ([compiler/](compiler/README.md)) generates bit-exact firmware. v0 (one core) runs at 8.83 ms from SRAM; v1 with both cores runs at **4.80 ms, 3.0x faster than the CMSIS-NN bar** (14.52 ms).
+*As of 11 Nov 2026.* Phase 0 steps 0–6 are done. Gate 0 is met on correctness and baselines; only the energy measurement (step 2b) is left. **Phase 1 has started:** the compiler ([compiler/](compiler/README.md)) generates bit-exact firmware. v0 (one core) runs at 8.18 ms from SRAM; v1 with both cores, SMLAD and branch-free ReLUs runs at **4.23 ms, 3.4x faster than the CMSIS-NN bar** (14.52 ms).
 
 - **Gate 0 results ([results/](results/README.md)):** the plain-C reference on the Pico 2 is bit-exact with its golden model on all 10,000 test images: 99.47% accuracy, 10.21 ms per image (9.52 ms from SRAM). The CMSIS-NN int8 baseline with the same weights gets 99.44% at 18.70 ms (14.52 ms from SRAM). 14.52 ms is the speed bar for Gate 1.
 - **Hardware:** one Pico 2 with headers, a micro-USB data cable, a USB power meter and a Pi 4. A Debug Probe and a USB-C cable for the meter are on order. Until they arrive, flashing and the test link both go over the Pico's own USB.

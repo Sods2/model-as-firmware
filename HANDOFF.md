@@ -36,6 +36,8 @@ flowchart LR
 | Plain-C reference, CMSIS-NN baseline, harness | ✅ Done 11 Nov (steps 4–6). Bit-exact with golden models on 10k images. ref_c: 99.47%, 10.21 ms (9.52 ms from SRAM). CMSIS-NN int8: 99.44%, 18.70 ms (14.52 ms from SRAM, the Gate 1 bar). See `results/README.md` |
 | Compiler v0 (Phase 1 step 7) | ✅ 11 Nov, branch `phase1-compiler-v0`. `compiler/mafc`: front end -> IR -> interpreter -> RP2350 C. Bit-exact on 10k images; 9.33 ms from flash, 8.83 ms from SRAM (1.64x faster than CMSIS-NN). Next: v1 optimizations and idea A (see `notes/compiler.md`) |
 | Compiler v1, second core | ✅ 11 Nov. `--cores 2` splits conv channels and fc1/fc2 rows across both cores. Bit-exact; **4.80 ms from SRAM** (3.0x faster than CMSIS-NN), 5.80 ms from flash. Next: SIMD (SMLAD, proven-safe int16) and idea A for fc1 |
+| Compiler v1, SMLAD | ✅ 11 Nov. Bound analysis (`bounds.py`) proves int16 for conv1/dw1/pool1; SMLAD kernels for dw1 and dw2. Bit-exact; **4.36 ms from SRAM on two cores** (3.33x faster than CMSIS-NN) |
+| Compiler v1, branch-free ReLU | ✅ 11 Nov. The ReLU is written clamp-then-shift, so gcc emits no branch or IT block in the conv loops; this fixed conv1's int16 regression and most of v0's dw1 gap (FINDINGS F14). All mafc builds re-measured: **4.23 ms from SRAM on two cores** (3.44x faster than CMSIS-NN). Next: conv1 SIMD, then fc1 formats and idea A |
 | Gate 0 | ⏳ Met except energy: step 2b waits for the USB-C cable (ordered, along with a Debug Probe) |
 | Atome LM baseline | ❌ Not reproduced (Phase 3) |
 

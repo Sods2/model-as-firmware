@@ -61,3 +61,31 @@ Stage profiles are in `profile_stages.csv` (`mafc_v0_prof`, `mafc_v0_ram_prof` r
 | mafc_v1_dual (flash) | tern80z90 | 99.51% | 5.78 ms | 1.60x | n/a | 49.1 KB | 10.8 KB |
 
 Bit-exact on all 10,000 images. From SRAM the second core gives close to the ideal 2x (1.84x). From flash it gives less (1.61x), because both cores share the 16 KB XIP cache. The stage profile has an extra `join` column, so it's in `profile_stages_dual.csv`.
+
+### v1 + SMLAD on depthwise convs (`*_simd`)
+
+| Build | Model | Accuracy | Latency | vs same build without SMLAD | vs CMSIS-NN (same memory) | Flash | RAM |
+|---|---|---|---|---|---|---|---|
+| mafc_v0_simd (flash) | tern80 | 99.47% | 8.93 ms | 1.04x | 2.09x | 48.7 KB | 9.2 KB |
+| mafc_v0_simd (SRAM) | tern80 | 99.47% | 8.29 ms | 1.07x | 1.75x | 48.5 KB | 57.8 KB |
+| mafc_v1_dual_simd (flash) | tern80 | 99.47% | 5.54 ms | 1.05x | 3.38x | 51.1 KB | 10.8 KB |
+| mafc_v1_dual_simd (SRAM) | tern80 | 99.47% | **4.36 ms** | 1.10x | **3.33x** | 51.0 KB | 61.7 KB |
+
+Bit-exact on all 10,000 images. Analysis in [notes/compiler.md](../notes/compiler.md) and FINDINGS F9/F13.
+
+### Branch-free ReLU (all mafc builds re-measured, `notes` = `branch-free ReLU`)
+
+The back end now writes the conv ReLU as clamp-then-shift (FINDINGS F14). Same results, faster code. These rows replace the four tables above as the current numbers.
+
+| Build | Before | After | Change | vs CMSIS-NN (same memory) | Flash | RAM |
+|---|---|---|---|---|---|---|
+| mafc_v0 (flash) | 9.33 ms | 8.66 ms | −7.1% | 2.16x | 46.4 KB | 9.2 KB |
+| mafc_v0 (SRAM) | 8.83 ms | 8.18 ms | −7.4% | 1.77x | 46.3 KB | 55.5 KB |
+| mafc_v1_dual (flash) | 5.80 ms | 5.46 ms | −5.8% | 3.43x | 48.9 KB | 10.8 KB |
+| mafc_v1_dual (SRAM) | 4.80 ms | 4.53 ms | −5.7% | 3.21x | 48.8 KB | 59.5 KB |
+| mafc_v0_simd (flash) | 8.93 ms | 8.11 ms | −9.2% | 2.31x | 48.6 KB | 9.2 KB |
+| mafc_v0_simd (SRAM) | 8.29 ms | 7.44 ms | −10.3% | 1.95x | 48.5 KB | 57.7 KB |
+| mafc_v1_dual_simd (flash) | 5.54 ms | 5.40 ms | −2.5% | 3.46x | 50.9 KB | 10.8 KB |
+| **mafc_v1_dual_simd (SRAM)** | 4.36 ms | **4.23 ms** | −3.1% | **3.44x** | 50.8 KB | 61.6 KB |
+
+All tern80, 99.47%, bit-exact on all 10,000 images. Stage profiles (`profile_stages*.csv`, 18:19 rows): conv1 −14%, dw1 −15% in the SMLAD build; dw1 −20% in v0.

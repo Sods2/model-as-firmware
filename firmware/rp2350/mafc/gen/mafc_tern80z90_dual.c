@@ -552,7 +552,7 @@ static inline void conv1_ch(const int8_t *restrict in, const int8_t *restrict k,
             int32_t s = k0 * r0[x] + k1 * r0[x + 1] + k2 * r0[x + 2]
                       + k3 * r1[x] + k4 * r1[x + 1] + k5 * r1[x + 2]
                       + k6 * r2[x] + k7 * r2[x + 1] + k8 * r2[x + 2];
-            o[x] = s < 0 ? 0 : (s >> 4);
+            o[x] = (int32_t)((s > 0 ? s : 0) >> 4);
         }
     }
 }
@@ -567,7 +567,7 @@ static inline void dw1_ch(const int32_t *restrict in, const int8_t *restrict k, 
             int32_t s = k0 * r0[x] + k1 * r0[x + 1] + k2 * r0[x + 2]
                       + k3 * r1[x] + k4 * r1[x + 1] + k5 * r1[x + 2]
                       + k6 * r2[x] + k7 * r2[x + 1] + k8 * r2[x + 2];
-            o[x] = s < 0 ? 0 : (s >> 4);
+            o[x] = (int32_t)((s > 0 ? s : 0) >> 4);
         }
     }
 }
@@ -594,7 +594,7 @@ static inline void dw2_ch(const int32_t *restrict in, const int8_t *restrict k, 
             int32_t s = k0 * r0[x] + k1 * r0[x + 1] + k2 * r0[x + 2]
                       + k3 * r1[x] + k4 * r1[x + 1] + k5 * r1[x + 2]
                       + k6 * r2[x] + k7 * r2[x + 1] + k8 * r2[x + 2];
-            o[x] = s < 0 ? 0 : (s >> 4);
+            o[x] = (int32_t)((s > 0 ? s : 0) >> 4);
         }
     }
 }

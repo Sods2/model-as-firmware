@@ -62,6 +62,69 @@ At v0 the conv stack is about 70% of the cycles and fc1 about 20%. Candidates, b
 - **From SRAM, close to the ideal 2x:** 1.84x overall. The conv segment is 1.90x and fc1 1.83x. The join wait (12k cycles, 1.6%) shows the two halves are well balanced; core 1 is slightly slower, likely from SRAM bank contention.
 - **From flash, the second core helps less:** 1.60x overall, and fc1 only 1.40x. Both cores now pull fc1's 6 KB of ternary words and both cores' code through the one 16 KB XIP cache. Flash bandwidth and cache sharing are the limit again, which is the project's premise once more. The best dual-core setup runs from SRAM.
 
+## v1 step 2: SMLAD on depthwise convs (`compile.py --simd`, builds `*_simd`)
+
+**Bound analysis** (`compiler/mafc/bounds.py`): an exact interval analysis over every possible int8 input. For each conv channel it takes the sum over taps of min/max(k·lo, k·hi) per input channel, then applies ReLU and the shift. It also bounds |partial sums|. It's checked against 20k real images (train + test) for all three models: every observed value lies inside its bound.
+
+| tern80 | proven range | observed max (20k images) | storage |
+|---|---|---|---|
+| conv1 out | [0, 2,643] | 1,969 | int16 |
+| dw1 out / pool1 out | [0, 19,743] | 5,658 | int16 |
+| dw2 out / pool2 out | [0, 132,087] | 12,094 | int32 |
+
+(tern80z70: dw1 ≤ 27,623; tern80z90: ≤ 22,846; all int16.) **This corrects F9's first estimate.** That estimate (dw1 ≤ 60,830, "not int16") charged negative weights as if they could add to the sum, but the inputs are ReLU outputs and never negative. The exact bound shows dw1/pool1 fit int16, so **dw2's input is int16 too, and both dw1 and dw2 get SMLAD**.
+
+**Code generation:**
+- A tensor in the fused segment is stored as int16 when its proven range fits. The last op (pool2) still writes `feat` as int32.
+- A depthwise conv reading an int16 plane uses an SMLAD kernel that produces two outputs per step. Per kernel row it does two aligned word loads (i0,i1) and (i2,i3), then `SMLAD`+`SMLABB` for output x and `SMLAD` (on the repacked (i1,i2), one `ORR` with shift) + `SMLATB` for x+1.
+- Weights are pre-packed per channel at compile time as (k1,k0) pairs plus k2. The plane width must be even for aligned word pairs (14 and 6 are).
+- On the PC the DSP intrinsics are plain-C functions with the same result, so the PC check covers the arithmetic.
+- Non-SIMD outputs are byte-identical to before (checked with `cmp` on all 9 previously generated files).
+
+**Results** (10k images, bit-exact, `results/phase1.csv`):
+
+| tern80 | before (v0 / v1) | with SMLAD | gain |
+|---|---|---|---|
+| one core, flash | 9.33 ms | 8.93 ms | 1.04x |
+| one core, SRAM | 8.83 ms | 8.29 ms | 1.07x |
+| two cores, flash | 5.80 ms | 5.54 ms | 1.05x |
+| **two cores, SRAM** | 4.80 ms | **4.36 ms** | **1.10x** |
+
+**Profile** (one core, SRAM, stage cycles): dw1 450k → 320k (**−29%**), dw2 53k → 35k (**−35%**), but **conv1 466k → 522k (+12%)**. conv1's arithmetic didn't change; it now stores int16 instead of int32, and gcc's code for that loop got worse. That's the same kind of effect as the v0 dw1 regression. Without it the gain would be about 1.11x on one core. With two cores from SRAM, core 1 now finishes before core 0 (join wait ≈ 0): core 0 carries the profiling counter reads, and the halves are close enough that profiling overhead decides which one waits.
+
+**Why conv1 got slower (investigated 11 Nov 2026).** The C source is identical except for `int16_t *out` and the `(int16_t)` cast. In the disassembly (`ref_infer` from the `-ram-prof` ELFs), gcc unrolls the x loop by 2 in both builds, but:
+
+| | v0 (int32 store) | SIMD build (int16 store) |
+|---|---|---|
+| ReLU, 1st output of pair | `cmp; ite lt; movlt; asrge` | same |
+| ReLU, 2nd output of pair | same, branch-free | `cmp; asr; blt` → out-of-line block that stores 0 and branches back |
+| loop shape | one `bne` back-edge | `beq` exit + unconditional `b.n` back-edge |
+| taken branches per pair | 1 | 2 if 2nd sum ≥ 0, 3 if < 0 |
+| stack reloads of weights per pair | 11 | 12 (output pointer now takes a register) |
+| measured cycles per pair (SRAM) | 59.5 | 66.6 |
+
+conv1 pre-ReLU sums are negative 49% of the time (1,000 test images, same at even and odd x), so the slow path is taken about every other pair, and there is no branch predictor to hide it. The standalone compile with the same flags (`-O3 -mcpu=cortex-m33 -march=armv8-m.main+fp+dsp`) reproduces it: the current form has 5 branches, against 2 for the int32 form. Two equivalent rewrites, `t = s > 0 ? s : 0; o[x] = t >> 4` and `(s & ~(s >> 31)) >> 4`, both compile to `bic r, r, r, asr #31; asrs; strh`: no branches, no IT, 2 instructions shorter per output than v0. Exact, because `0 >> 4 == 0`. The fix goes in the back end's ReLU emission for every layer.
+
+### v1 step 3: branch-free ReLU (11 Nov 2026)
+
+`backend_rp2350_c.relu_shift()` emits `(ctype)((s > 0 ? s : 0) >> sh)` for every conv (plain and SMLAD). gcc compiles it to `bic r, r, r, asr #31; asrs`. Every generated file changed, including the v0 and dual ones, so they're no longer byte-identical to the earlier outputs. All 12 variants are bit-exact on the PC (10k images), and the 8 tern80 builds are bit-exact on the board.
+
+Loops in the disassembly (`ref_infer`, RAM profile ELFs; `harness/asm_loops.py` lists every loop with its instruction, IT and branch counts):
+
+| Loop | before | after |
+|---|---|---|
+| v0 conv1 (2 outputs) | 49 instr, 2 IT | 45, branch-free |
+| v0 dw1 (2 outputs) | 61 instr, 2 IT | 53, branch-free |
+| SMLAD conv1 (2 outputs) | 50 instr, 1 IT + `blt` path | 46, branch-free |
+| SMLAD dw1 (2 outputs) | 48 instr, 2 IT | 36, branch-free |
+| SMLAD dw2 (4 outputs) | 95 instr, 7 IT | 69, branch-free |
+
+Measured (stage cycles, one core, SRAM): SMLAD build conv1 522k → 451k, dw1 320k → 273k, dw2 35k → 34k; v0 conv1 466k → 460k, dw1 450k → 360k, dw2 53k → 45k. Whole model (10k images, SRAM): v0 8.83 → 8.18 ms, v1 two cores 4.80 → 4.53 ms, v0 + SMLAD 8.29 → 7.44 ms, **v1 + SMLAD two cores 4.36 → 4.23 ms (3.44x faster than CMSIS-NN)**. All numbers are in `results/README.md` and FINDINGS F14.
+
+Lesson: the select form cost far more than its own instructions; it changed register allocation and scheduling of whole loops. That's also most of the old v0 dw1 regression (F6). Check branch and IT counts in the hot loops after every back-end change.
+
+**Next:** conv1 is still the largest stage (38–40% of cycles). It needs its own SIMD path. Its input is the int8 image, so pairs come from `SXTB16` on a word of four pixels, then `SMLAD` against packed (k1,k0) pairs. Its outputs are provably ≤ 2,643 and its partial sums ≤ 42k, so int16 arithmetic is exact.
+
 ## Lessons
 
 - The worst-case bound analysis belongs in the compiler: it decides data types (int16 vs int32) and proves no overflow. The current interpreter only *asserts* int32 safety at run time.
