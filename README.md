@@ -24,6 +24,26 @@ Feasible as a proof of concept, but expect a solid improvement over a standard e
 - **Training ([train/](train/README.md)):** BitNetMCU's ternary MNIST CNN reaches 99.45% final and 99.48% best, against 99.52% reported. Variants with 70% and 90% of the ternary-layer weights forced to zero lose no accuracy (99.44% and 99.50%).
 - **Waiting on parts:** the energy check (step 2b) needs the USB-C cable for the power meter.
 
+## Watch it run
+
+A browser view shows what the board computes as each test image goes through it: time per stage, each layer's feature maps, the ternary weights, and the logits against the golden model. From the repo root in Git Bash:
+
+```bash
+# on the board (Pico 2 on COM3, running any ref_c, cmsis_nn or mafc build)
+train/.venv/Scripts/python.exe harness/bridge.py --target pico --port COM3
+# without hardware: the C reference built for the PC, or the golden model alone
+train/.venv/Scripts/python.exe harness/bridge.py --target host --exe firmware/baselines/ref_c/build-host/ref_host_tern80.exe
+train/.venv/Scripts/python.exe harness/bridge.py --target golden
+```
+
+Then open http://127.0.0.1:8765 and stop it with Ctrl+C.
+
+- **Modes:** Live, Slow-mo ×1000 (steps through one image's stages) and Replay.
+- **Per-stage times:** need a `*_prof` build.
+- **Sharing the board:** while the bridge runs it holds COM3, so stop it before a measurement. It won't start on the board while `run.py`, `measure.sh` or `picotool` is running.
+
+Options and details are in [harness/README.md](harness/README.md#watching-a-run-live).
+
 ## Documents
 
 | File | What's in it |
