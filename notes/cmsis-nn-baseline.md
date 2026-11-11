@@ -35,6 +35,14 @@ CMSIS-NN is self-contained (its own `Internal/arm_nn_compiler.h`) and needs no C
 | `firmware/baselines/cmsis_nn/cmsis_infer.c` | the network as CMSIS-NN calls: `arm_convolve_wrapper_s8`, `arm_depthwise_conv_wrapper_s8` (dispatches to `arm_depthwise_conv_3x3_s8`), `arm_max_pool_s8`, `arm_fully_connected_s8` |
 | `firmware/baselines/cmsis_nn/CMakeLists.txt` | build; reuses `../ref_c/pico_main.c` so the harness protocol is identical |
 
+## Audit: is this CMSIS-NN at its best? (11 Nov 2026, FINDINGS F17)
+
+- **Compiler flags:** `-O3 -mcpu=cortex-m33 -march=armv8-m.main+fp+dsp`, so `arm_nn_math_types.h` turns on `ARM_MATH_DSP` and the SMLAD paths are used.
+- **dw1/dw2:** `arm_depthwise_conv_wrapper_s8` picks the dedicated `arm_depthwise_conv_3x3_s8` (ch_mult 1, padding ≤ 1, no MVE). That is the fastest depthwise kernel CMSIS-NN has for a DSP-only core. It is still slow here, because it works on NHWC with per-tap 4-channel loads and per-channel requantization.
+- **conv1:** `arm_convolve_wrapper_s8` falls through to `arm_convolve_s8` (im2col + `arm_nn_mat_mult_kernel_s8_s16`). The 1×1 and 1×N fast paths don't apply to a 3×3 kernel, and there is no special path for one input channel.
+- **Conclusion:** nothing to fix; the baseline uses the library as intended. CMSIS-NN is single-core, so like-for-like comparisons are one core against one core (3.75x).
+- **Wide-conv test:** on a 32→32 channel 3×3 conv, the shape this library is tuned for, CMSIS-NN runs at about 2.1 cycles per MAC (`firmware/bench/conv_wide`).
+
 ## What profiling showed (stage cycles, tern80, image 0)
 
 | Stage | ref_c flash | ref_c SRAM | CMSIS-NN flash | CMSIS-NN SRAM |

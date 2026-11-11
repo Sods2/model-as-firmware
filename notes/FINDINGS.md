@@ -33,7 +33,7 @@ Setup for all numbers:
 
 All mafc rows were re-measured on 11 Nov with the branch-free ReLU (F14), which sped up every mafc build. The SMLAD rows are the v2 kernel (F15: conv1 on SMLAD too, no repacking, ReLU as one `USAT`). The earlier numbers (v0 8.83 ms, v1 4.80 ms, v1 + SMLAD 4.36 → 4.23 ms from SRAM) are in F13/F14, `results/phase1.csv` (the `notes` column says which version) and `results/README.md`.
 
-The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% for every ternary-pipeline build and 99.44% for CMSIS-NN, against 99.45% for the PyTorch model. Energy is **not measured yet** (step 2b, waiting for the USB-C cable).
+The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our two-core rows compare two cores with one; one core against one core, the best is 3.87 ms = 3.75x (F17). Accuracy: 99.47% for every ternary-pipeline build and 99.44% for CMSIS-NN, against 99.45% for the PyTorch model. Energy is **not measured yet** (step 2b, waiting for the USB-C cable).
 
 ## Findings
 
@@ -59,7 +59,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
 
 ### F5. The conv stack dominates, and CMSIS-NN handles this shape badly
 - **Evidence:** the conv layers are about 70% of single-core cycles in every build. CMSIS-NN's conv1 (1 input channel → 80) takes 1.07M cycles against 0.47M for mafc. Its depthwise 3x3 takes 0.82M against 0.45M.
-- **Meaning:** much of our 1.5–3x lead over CMSIS-NN comes from this model's unusual shape (a single-input-channel first layer, depthwise convs). That is a weakness of the baseline more than a strength of our method. **Don't overclaim at Gate 1.** Test on a wide-channel model too before drawing general conclusions.
+- **Meaning:** much of our 1.5–3x lead over CMSIS-NN comes from this model's unusual shape (a single-input-channel first layer, depthwise convs). That is a weakness of the baseline more than a strength of our method. **Don't overclaim at Gate 1.** Test on a wide-channel model too before drawing general conclusions. *(Done in F17: on a wide conv, ternary-as-code still wins once at least ~14% of weights are zero.)*
 
 ### F6. Specialising everything isn't automatically faster
 - **Evidence:** mafc v0's constant-size loops made conv1 34% faster (it reads the int8 image directly instead of widening it per channel) but dw1 12% slower, with the same arithmetic. Everything was inlined in both builds, so the difference is gcc's unrolling and register pressure on the M33.
@@ -189,6 +189,69 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
   - With fc1 down to 8% of the time, the convs are about 70% again: conv1 36%, dw1 27%, with the join wait at 7% and fc2 at 9% (two cores, SRAM).
   - For larger models, the choice between data and code is a placement question: what fits in SRAM, and what streams from flash.
 
+### F17. Fairness check: the lead holds one core against one core, and on a wide conv once at least ~14% of weights are zero
+- **The baseline is CMSIS-NN at its best for these shapes:**
+  - Built with `-O3 -mcpu=cortex-m33 +dsp`, so `ARM_MATH_DSP` is on.
+  - The wrappers pick the dedicated `arm_depthwise_conv_3x3_s8` for dw1/dw2.
+  - conv1 uses im2col + SMLAD (`arm_convolve_s8`); CMSIS-NN has no faster path for one input channel.
+  - Nothing to fix there.
+- **Cores:** CMSIS-NN uses one core. The headline 6.25x compares two cores with one.
+  - One core against one core (both from SRAM): **3.87 ms vs 14.52 ms = 3.75x**.
+  - A hypothetical perfectly parallel two-core CMSIS-NN (≥ 7.26 ms) would still be ≥ 3.1x slower than our two-core 2.32 ms.
+- **Per layer, one core, SRAM (stage cycles, image 0; CMSIS-NN against mafc v0 + SMLAD + fc1 as code):**
+
+  | Stage | CMSIS-NN | mafc | mafc faster by |
+  |---|---|---|---|
+  | conv1 (1→80) | 1,070k | 231k | 4.6x |
+  | dw1 | 822k | 171k | 4.8x |
+  | pool1 | 96k | 43k | 2.2x |
+  | dw2 | 92k | 24k | 3.7x |
+  | fc1 (ternary in mafc, int8 in CMSIS-NN) | 71k | 50k | 1.4x |
+  | fc2 | 17k | 59k | **0.28x (CMSIS-NN 3.6x faster)** |
+  | fc3 | 2k | 7k | **0.29x** |
+  | total | 2.18M | 0.59M | 3.7x |
+
+  - The big wins are the layers CMSIS-NN handles badly (one input channel, depthwise; F5).
+  - Our int4 fc2/fc3 still use a slow decode loop and lose clearly.
+- **Reverse test: a wide conv, the shape CMSIS-NN is built for.**
+  - Setup: one 3x3 conv, 10×10×32 → 8×8×32 (NHWC), ternary weights at 0–90% zeros, int8 activations, identical requantization.
+  - Kernels: CMSIS-NN `arm_convolve_wrapper_s8` (int8 weights holding the ternary values) against mafc's method (weights compiled into code, one straight-line sum per output channel).
+  - Checks: every kernel is bit-exact against the numpy reference, on the PC and on the board.
+  - Firmware `firmware/bench/conv_wide`, driver `harness/bench_conv.py`, data `results/bench_conv.csv`.
+
+  | Zero fraction | CMSIS-NN | mafc code | mafc faster by |
+  |---|---|---|---|
+  | 0% (dense ternary) | 1,257k | 1,457k | **0.86x (CMSIS-NN wins)** |
+  | 33% | 1,257k | 1,053k | 1.19x |
+  | 50% | 1,257k | 761k | 1.65x |
+  | 70% | 1,257k | 458k | 2.74x |
+  | 90% | 1,257k | 140k | 9.0x |
+
+  (one core, everything in SRAM, minimum of 20 runs; the means are within 0.02%)
+
+  - CMSIS-NN costs about 2.1 cycles per MAC, whatever the weights.
+  - The code kernel costs about 2.5 cycles per nonzero weight per output pixel, so its time is proportional to the nonzeros. Break-even is at about **14% zeros**.
+  - From flash, CMSIS-NN slows down by 3–50%. The code kernel was in SRAM in both builds, so the flash rows are not a like-for-like comparison and aren't used here.
+- **Meaning and limits:**
+  - Our method is not a trick of the MNIST shape. On CMSIS-NN's home ground it wins for ternary layers with typical sparsity (BitNet-style ternary layers are often 30–50% zeros), and it wins big with pruning.
+  - It loses on dense ternary layers (about 1.16x) and for int4/int8 layers: mafc's fc2/fc3 decode is 3.6x slower than CMSIS-NN.
+  - It only applies to ternary (multiply-free) weights. An int8 model would need multiplies, and CMSIS-NN's SMLAD path would be the bar.
+  - The code costs memory: about 6 bytes per nonzero weight (55 KB for the dense 9,216-weight layer), which must sit in SRAM to be fast (F16).
+  - On MNIST, the 4–5x conv wins come mostly from CMSIS-NN's weakness on this shape. The general claim is the 1.2–9x of the wide-conv test, depending on sparsity.
+
+## Gate 1
+
+**Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images), mafc is faster than CMSIS-NN in every like-for-like setup:
+- **3.75x on one core** (3.87 ms vs 14.52 ms, both from SRAM);
+- 6.25x with both cores against CMSIS-NN's one;
+- 4.55x for a one-core flash build with fc1 in SRAM, against CMSIS-NN from flash (18.70 ms).
+
+Scope (F5, F17):
+- The MNIST margin is inflated by CMSIS-NN's weak kernels for one-input-channel and depthwise convs.
+- On a wide conv, the general win from compiling ternary weights into code is 1.2x (33% zeros) to 9x (90% zeros), and it loses at 0% zeros.
+- It does not cover int8/int4 layers, where CMSIS-NN is still faster than mafc (fc2/fc3).
+- Energy (step 2b) is not measured yet.
+
 ## Open questions and next experiments
 
 | Question | How to test | Status |
@@ -198,7 +261,8 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
 | How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |
 | Where does the remaining time go? (two cores, fc1 as code) | conv1 36%, dw1 27%, join wait 7%, fc2 9%. Candidates: rebalance the channel split (core 0 waits about 24k cycles for core 1), fc2 as code or SMLAD, pool1 | Next |
-| Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Train or borrow a model with many input channels | Not started |
+| Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Wide-conv microbenchmark (F17): yes for ternary weights with ≥ ~14% zeros (1.19x at 33%, 1.65x at 50%, 9x at 90%); no for dense ternary (0.86x). Still open: a whole wide model, and int8 layers | Answered for one layer |
+| Make int4/int8 layers competitive (fc2/fc3 are 3.6x slower than CMSIS-NN) | fc2 as code (constant multiplies as shift-add) or SMLAD on unpacked int4 | Open |
 | Is the second core's flash penalty about cache thrashing or bandwidth? | Contention measured (F12): moderate on convs, strong on fc1. With fc1 as code in SRAM (F16), the flash build is 2.89 ms against 2.32 ms all-SRAM. The remaining 25% is the convs and fc2 from flash | Partly answered |
 
 ## Caveats

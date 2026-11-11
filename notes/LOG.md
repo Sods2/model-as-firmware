@@ -2,6 +2,18 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 11 Nov 2026 (late night, 2): fairness check, Gate 1
+
+- Audited the CMSIS-NN baseline. DSP is on, dw1/dw2 use the dedicated 3×3 depthwise kernel, and conv1 uses im2col (no faster path exists for one input channel). Nothing to fix.
+- Cores: the headline 6.25x is two cores against one. One core against one core: 3.87 vs 14.52 ms = **3.75x**.
+- Per layer (one core, SRAM): conv1 4.6x, dw1 4.8x, dw2 3.7x, fc1 1.4x faster; fc2/fc3 are 3.6x *slower* than CMSIS-NN (int4 decode).
+- New wide-conv microbenchmark (`firmware/bench/conv_wide`, `harness/bench_conv.py`): a 3×3 conv, 10×10×32 → 8×8×32, ternary weights at 0/33/50/70/90% zeros. CMSIS-NN against weights-as-code, bit-exact on the PC and the board.
+  - CMSIS-NN: 1.26M cycles at any sparsity.
+  - Code: 1.46M / 1.05M / 761k / 458k / 140k cycles.
+  - Break-even at about 14% zeros.
+- The first benchmark run had 3 cases and a different random draw; its rows in `bench_conv.csv` are labelled as superseded.
+- Gate 1 is met, with the scope written down in FINDINGS (F17, "Gate 1"). Energy is still open.
+
 ## 11 Nov 2026 (late night): fc1 formats; fc1 as code (idea A)
 
 - `compile.py --ternary {base3,sparse,code,dense}`, `-DTERNARY=` in CMake, and `build:model:mem:ternary` in `measure.sh`. All 18 new variants are bit-exact on the PC.

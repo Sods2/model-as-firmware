@@ -119,4 +119,19 @@ Build names carry the format (`_sparse`, `_code`, `_dense`; no suffix = base3). 
 
 All bit-exact on all 10,000 images. Accuracy: 99.47% for tern80 and z70, 99.51% for z90.
 
+### Wide-conv fairness benchmark (`bench_conv.csv`)
+
+One 3×3 conv, 10×10×32 → 8×8×32, ternary weights. CMSIS-NN `arm_convolve_wrapper_s8` against mafc's weights-as-code kernel; same requantization, and every output is checked bit-exact on the board (`bit_exact` column). One row per kernel and zero fraction, with min and mean cycles over 20 runs. Produced by `harness/bench_conv.py run` (see FINDINGS F17).
+
+| Zero fraction | CMSIS-NN (SRAM) | mafc code (SRAM) | mafc faster by |
+|---|---|---|---|
+| 0% | 1,256,567 | 1,456,839 | 0.86x |
+| 33% | 1,256,567 | 1,052,553 | 1.19x |
+| 50% | 1,256,567 | 760,851 | 1.65x |
+| 70% | 1,256,567 | 458,377 | 2.74x |
+| 90% | 1,256,567 | 139,842 | 8.99x |
+
+- Build `bench_conv_ram` is all in SRAM. In build `bench_conv` (flash), CMSIS-NN runs from flash but the code kernel is still placed in SRAM, so those rows are not like-for-like.
+- The rows labelled "first run" used 3 cases and different random weights.
+
 \* **RAM method changed on 11 Nov 2026 (these rows on).** `ram_kb` is now the sum of every section linked at a main-SRAM address (`arm-none-eabi-size -A`), excluding heap and stacks. Before, it was data + bss (+ text for copy_to_ram builds) from Berkeley `size`. That missed code copied to SRAM in flash builds: the first fc1-as-code flash build showed 9.7 KB instead of 97.5 KB. Compared with the new method, the old one overstated copy_to_ram builds by about 5–6 KB (it counted flash-only boot sections) and understated flash builds by about 2 KB. For example, mafc_v1_dual_simd (SRAM) was 62.9 KB the old way and is 56.3 KB the new way. Older rows were not rewritten.

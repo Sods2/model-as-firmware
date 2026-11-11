@@ -9,6 +9,7 @@ Sends MNIST test images to a target, checks the outputs bit for bit against a go
 | `export_cmsis.py` | Calibrates and writes the CMSIS-NN int8 model header |
 | `phase0_matrix.sh` | Builds, flashes and measures every Phase 0 configuration (`profile` or `final`) |
 | `measure.sh` | Builds, flashes and measures any list of `build:model:mem[:ternary]` specs (`ref_c`, `cmsis_nn`, `mafc`, `mafc2`, `mafc_s`, `mafc2_s`; ternary = the fc1 format of mafc builds), e.g. `harness/measure.sh final results/phase1.csv mafc2_s:tern80:ram:code`. `NOTES="..."` labels the CSV rows |
+| `bench_conv.py` | Wide-conv fairness benchmark (FINDINGS F17). `gen` writes the data and the generated code kernels to `firmware/bench/conv_wide/gen/`; `run` drives the flashed benchmark firmware and logs `results/bench_conv.csv` (every kernel's output is checksum-checked on the board) |
 | `bridge.py` | Live view: runs a target image by image and streams each result, the per-stage cycles and the golden model's layer outputs to [`ui/live.html`](../ui/live.html) in the browser |
 
 ## Typical use (Git Bash, from the repo root)
