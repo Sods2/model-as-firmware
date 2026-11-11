@@ -22,6 +22,8 @@ Endpoints:
 import argparse
 import csv
 import json
+import os
+import re
 import queue
 import subprocess
 import sys
@@ -93,14 +95,59 @@ class HostTarget:
             self.proc = None
 
 
+# Anything that drives the board. While one of these runs, the bridge must not open the serial port: on
+# Windows only one process can hold it, so grabbing it between two measurement runs (while measure.sh
+# flashes the next build) would make the next run.py fail to open it.
+BOARD_USERS = re.compile(r'harness[/\\](run\.py|measure\.sh|phase0_matrix\.sh)|picotool')
+
+
+def board_users():
+    """Command lines of other processes that drive the board, or None if the process list can't be read."""
+    try:
+        if os.name == 'nt':
+            cmd = ['powershell', '-NoProfile', '-Command',
+                   'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }']
+            sep = '\t'
+        else:
+            cmd, sep = ['ps', '-eo', 'pid=,args='], None
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if not out.strip():
+        return None
+    users = []
+    for line in out.splitlines():
+        parts = line.strip().split(sep, 1)
+        m = BOARD_USERS.search(parts[1]) if len(parts) == 2 and parts[0] != str(os.getpid()) else None
+        if m:
+            what = parts[1][m.start():m.start() + 120].split('"')[0].strip()
+            if what not in users:
+                users.append(what)
+    return users
+
+
+def ensure_board_free(force):
+    if force:
+        return
+    users = board_users()
+    if users is None:
+        raise TargetLost('could not read the process list to check that no test is using the board; '
+                         'pass --force if you are sure it is free')
+    if users:
+        raise TargetLost('the board is in use, so the bridge will not open the port (pass --force to override):\n  '
+                         + '\n  '.join(users))
+
+
 class PicoTarget:
     """The board over USB serial, same protocol as run.py. Asks for per-stage cycles after every image
-    until the build shows it was compiled without stage profiling (all zeros)."""
+    until the build shows it was compiled without stage profiling (all zeros).
+    Refuses to open the port while a harness run, measurement script or picotool is running."""
 
-    def __init__(self, port):
-        self.port, self.s, self.want_stages = port, None, True
+    def __init__(self, port, force=False):
+        self.port, self.s, self.want_stages, self.force = port, None, True, force
 
     def open(self):
+        ensure_board_free(self.force)  # before touching the port at all
         import serial
         try:
             self.s = serial.Serial(self.port, 115200, timeout=5)
@@ -429,6 +476,8 @@ def main():
     ap.add_argument('--no-stop-on-mismatch', dest='stop_on_mismatch', action='store_false',
                     help='keep going when the board disagrees with the golden model')
     ap.add_argument('--no-pytorch', dest='pytorch', action='store_false', help='skip the PyTorch agreement check')
+    ap.add_argument('--force', action='store_true',
+                    help='open the board even if a harness run, measure script or picotool seems to be running')
     ap.add_argument('--http-port', type=int, default=8765)
     args = ap.parse_args()
     if args.target == 'host' and not args.exe:
@@ -440,7 +489,7 @@ def main():
 
     meta = {}
     if args.target == 'pico':  # ask the board what it runs, to pick the matching model and golden model
-        probe = PicoTarget(args.port)
+        probe = PicoTarget(args.port, args.force)
         try:
             meta = probe.open()
         except TargetLost as e:
@@ -466,7 +515,7 @@ def main():
     elif args.target == 'host':
         target = HostTarget(args.exe, img8)
     else:
-        target = PicoTarget(args.port)
+        target = PicoTarget(args.port, args.force)
     if args.golden is None:
         args.golden = 's8' if meta.get('build', '').startswith('cmsis_nn') else 'ref'
     if args.golden == 'ref':

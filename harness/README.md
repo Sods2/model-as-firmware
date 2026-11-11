@@ -44,7 +44,7 @@ Then open http://127.0.0.1:8765. The page has three modes:
 
 The inspector shows each layer's feature maps, FC1's −1/0/+1 weight matrix, and the FC outputs. These come from `golden.py`, so they are exactly what the board computed. Per-stage times need a `*_prof` build (`PROFILE_STAGES`). On other builds the bridge stops asking after the first all-zero `T` reply.
 
-If the board disagrees with the golden model, the run pauses and the page shows a red banner with the differing logits. Pass `--no-stop-on-mismatch` to keep going. `--rate` sets images per second (the page has a speed control too). The bridge only listens on 127.0.0.1. It needs nothing beyond what `run.py` already uses, because it streams over Server-Sent Events from Python's standard-library HTTP server. It doesn't log to `results/`; use `run.py` for measured runs.
+If the board disagrees with the golden model, the run pauses and the page shows a red banner with the differing logits. Pass `--no-stop-on-mismatch` to keep going. `--rate` sets images per second (the page has a speed control too). With `--target pico`, the bridge won't open the serial port while `harness/run.py`, `measure.sh`, `phase0_matrix.sh` or `picotool` is running, so it can't take the board from a measurement. `--force` overrides this. `golden` and `host` never touch the board. The bridge only listens on 127.0.0.1. It needs nothing beyond what `run.py` already uses, because it streams over Server-Sent Events from Python's standard-library HTTP server. It doesn't log to `results/`; use `run.py` for measured runs.
 
 ## What "matches PyTorch" means
 
