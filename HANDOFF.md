@@ -44,6 +44,7 @@ flowchart LR
 | Gate 0 | ⏳ Met except energy: step 2b waits for the USB-C cable (ordered, along with a Debug Probe) |
 | Compiler v1, fc2/fc3 as code | ✅ 12 Nov. `--int4 {packed,code,dense}`. fc2 as code is 3.4x faster (59k → 17k cycles), level with CMSIS-NN. Bit-exact; **2.15 ms from SRAM on two cores** (6.77x), **3.56 ms on one core (4.08x like-for-like)**; flash builds 2.35 / 3.59 ms (FINDINGS F18) |
 | Idea A three-way test; join fix | ✅ 12 Nov. All-data / hybrid (linear as code) / all-code (`--conv code`): the hybrid is fastest from flash and ties all-code from SRAM with less flash, so **keep the hybrid** (FINDINGS F20). The two-core join wait was a worse inlined copy of the conv kernel on core 1; with a shared `noinline` kernel it is **1.99 ms from SRAM on two cores** (7.28x), 2.27 ms from flash (F19). Next: PR to main, then idea C |
+| Idea C: DMA streaming | ✅ 12 Nov. Benchmark `firmware/bench/stream`: for a 64 KB layer in flash, double-buffered DMA from the XIP stream FIFO is **31% faster** than reading through the cache, and DMA from the uncached alias is slower. **Keep** (FINDINGS F21). Not yet in the compiler (nothing in the MNIST build streams). The RP2350 has XIP counters after all (`ctr_hit`/`ctr_acc`) |
 | Gate 1 | ✅ Met 11 Nov at equal accuracy: 3.75x one core against one core (4.08x after F18), 6.25x with both cores (6.77x after F18). Scope in FINDINGS F17 and "Gate 1"; energy not yet measured |
 | Atome LM baseline | ❌ Not reproduced (Phase 3) |
 

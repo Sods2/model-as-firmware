@@ -317,6 +317,31 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - Each specialised channel function adds about 170 bytes of instructions, 41 KB in all. From flash that code streams through the 16 KB XIP cache and the conv stack becomes 2–3x slower.
   - The rule for the compiler: **weights with no reuse → code (in SRAM); weights with reuse → data.**
 
+### F21. Idea C: streaming weights from flash with DMA while computing saves 31%, but only through the XIP stream FIFO
+- **Test:** `firmware/bench/stream`, driven by `harness/bench_stream.py`.
+  - One dense int8 linear layer, 256→256, whose 64 KB of weights stay in flash (4x the 16 KB XIP cache).
+  - The same `SXTB16`/`SMLAD` kernel runs in every variant. Kernels, input and buffers are in SRAM, so only the weights touch flash.
+  - One core; flash SCK 75 MHz (`PICO_FLASH_SPI_CLKDIV` 2); 2 KB blocks (8 rows).
+  - Every variant is bit-exact (output checksum checked on the board); minimum of 10 runs.
+
+  | Variant | Cycles | vs xip_cached |
+  |---|---|---|
+  | weights in SRAM (compute only) | 216k | |
+  | **xip_cached**: read in place through the cache (what flash builds do today) | 646k | |
+  | xip_nocache: read in place through the uncached alias `0x14000000` | 654k | +1% |
+  | dma_seq: DMA a block from the uncached alias, then compute it | 723k | +12% |
+  | dma_alias: the same, double-buffered | 822k | **+27%** |
+  | stream_seq: DMA from the XIP stream FIFO (`XIP_AUX`, `DREQ_XIP_STREAM`), then compute | 697k | +8% |
+  | **dma_stream**: stream FIFO, double-buffered | **443k** | **−31%** |
+
+- **Reading:**
+  - From flash, this layer costs about 430k cycles more than from SRAM, about 6.6–6.8 cycles per byte (≈ 22 MB/s, against 37.5 MB/s raw for a quad SPI at 75 MHz). That is the same for cache-line fills and for the stream FIFO.
+  - Double-buffered streaming hides all of the compute: 443k is about the transfer time alone. In place, the CPU stalls on every cache miss, so compute and transfer add up.
+  - DMA from the uncached alias is slower than the cache and gets *worse* with overlap. Each word is a separate flash transaction, and the overlapped DMA is exposed to XIP bus stalls; the datasheet gives this as the reason the `XIP_AUX` stream port exists.
+- **Verdict:** **keep.** The roadmap target was ≥20% lower latency. The mechanism to use is the XIP stream FIFO plus double-buffered DMA into SRAM.
+- **Where it applies:** layers whose weights stay as data and don't fit SRAM or the cache. In today's best MNIST build no layer is like that: the linear layers are code in SRAM, and the conv weights fit the cache. So it matters for the larger models of later phases (and for idea G, the SRAM cache over flash). The compiler doesn't emit it yet.
+- **Correction:** the RP2350 *does* have XIP cache counters (`xip_ctrl_hw->ctr_hit`, `ctr_acc` in `hardware/structs/xip.h`); [pico-toolchain.md](pico-toolchain.md) wrongly said it had none. Bytes read from flash per inference can be measured with them (open question below).
+
 ## Gate 1
 
 **Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images), mafc is faster than CMSIS-NN in every like-for-like setup:
@@ -335,7 +360,8 @@ Scope (F5, F17):
 | Question | How to test | Status |
 |---|---|---|
 | Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b) | Waiting for cable |
-| Bytes actually read from flash per inference | No XIP counters on the RP2350 ([pico-toolchain.md](pico-toolchain.md)); estimate from weight layout, or the Debug Probe | Open |
+| Bytes actually read from flash per inference | The RP2350 has XIP counters after all (`ctr_hit`, `ctr_acc`; F21). Read them around `ref_infer()` in the harness | Open, now measurable |
+| Idea C: DMA streaming of weights | F21: stream FIFO + double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. Not yet emitted by the compiler (no layer in the current best build needs it) | Done (benchmark) |
 | How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |
 | Where does the remaining time go? (two cores, all linear as code) | Join wait fixed (F19). Now conv1 42%, dw1 31%, pool1 8%, fc1 9%: the conv stack is about 85%. Candidates: fuse pool1 into dw1, conv1 channel pairs | Open |

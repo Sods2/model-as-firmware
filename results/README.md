@@ -149,6 +149,22 @@ All bit-exact on all 10,000 images.
 
 All tern80, bit-exact on all 10,000 images. Idea A verdict and table: FINDINGS F20.
 
+### Idea C: DMA streaming benchmark (`bench_stream.csv`)
+
+A dense int8 linear layer, 256→256, with its 64 KB of weights in flash and the same SMLAD kernel throughout. One row per variant, with the min and mean cycles of 10 runs and an on-board bit-exact check. Produced by `harness/bench_stream.py run` (FINDINGS F21).
+
+| Variant | Cycles (min) | vs xip_cached |
+|---|---|---|
+| sram | 215,557 | |
+| xip_cached | 645,873 | |
+| xip_nocache | 653,888 | +1% |
+| dma_seq | 723,293 | +12% |
+| dma_alias | 821,819 | +27% |
+| stream_seq | 697,376 | +8% |
+| **dma_stream** | **442,876** | **−31%** |
+
+This is the latest run (notes: `+ stream_seq`); the run before it gives the same picture. The rows labelled "first run" had the input vector in flash, a confound.
+
 ### Wide-conv fairness benchmark (`bench_conv.csv`)
 
 One 3×3 conv, 10×10×32 → 8×8×32, ternary weights. CMSIS-NN `arm_convolve_wrapper_s8` against mafc's weights-as-code kernel; same requantization, and every output is checked bit-exact on the board (`bit_exact` column). One row per kernel and zero fraction, with min and mean cycles over 20 runs. Produced by `harness/bench_conv.py run` (see FINDINGS F17).

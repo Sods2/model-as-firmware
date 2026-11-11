@@ -2,6 +2,18 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 12 Nov 2026 (night): idea C, DMA streaming from flash
+
+- New benchmark `firmware/bench/stream` + `harness/bench_stream.py`: a dense int8 256→256 layer, 64 KB of weights in flash, the same SMLAD kernel fed seven ways. All bit-exact.
+- Cycles:
+  - SRAM 216k (compute only);
+  - in place through the cache 646k; through the uncached alias 654k;
+  - DMA from the alias 723k sequential, 822k double-buffered (worse);
+  - DMA from the XIP stream FIFO 697k sequential, **443k double-buffered (−31%)**.
+- Idea C: **keep** (target ≥20%). Use the stream FIFO, not the alias. The compiler doesn't need it for MNIST yet: nothing in the best build streams.
+- First run had the input vector in flash (`const`), which inflated every flash variant; it was fixed (input copied to SRAM), and those rows are labelled superseded.
+- Found: the RP2350 has XIP hit/access counters (`ctr_hit`, `ctr_acc`). pico-toolchain.md was corrected; flash traffic is now measurable.
+
 ## 12 Nov 2026 (later): idea A three-way test; join wait fixed
 
 - `--conv code`: conv weights as immediates, one SMLAD function per channel (240 functions), for the all-code build. Bit-exact on the PC and the board.

@@ -57,7 +57,8 @@ PT=~/.pico-sdk/picotool/2.3.1/picotool/picotool.exe
 
 ## Measuring flash traffic (open question)
 
-- The RP2040 had XIP cache counters (`XIP_CTR_HIT`, `XIP_CTR_ACC`). The **RP2350 register headers in SDK 2.3.1 have none** (checked 11 Nov 2026), so the `flash_read_kb` metric can't simply be read from a counter.
+- **Correction (12 Nov 2026):** the RP2350 *has* XIP cache counters: `xip_ctrl_hw->ctr_hit` and `ctr_acc` (`hardware/structs/xip.h`, registers `XIP_CTR_HIT` / `XIP_CTR_ACC` at `XIP_CTRL_BASE + 0x0c / 0x10`; write to clear). The 11 Nov check that found "none" looked in the wrong header. Misses = acc − hit; times the 8-byte line size, that gives about the bytes fetched through the cache. Uncached and DMA/stream reads are not counted as hits.
+- The XIP stream FIFO (`stream_addr`, `stream_ctr`, read via `xip_aux_hw->stream` with `DREQ_XIP_STREAM`) is the fast path for DMA from flash (FINDINGS F21).
 - Options still to check: work out bytes read from the weight layout and the 16 KB cache (analytically); the QMI or bus-performance counters in the RP2350 datasheet; or compare the same build with `RUN_FROM_RAM` on and off, as the CMSIS-NN fc1 experiment already did (524k vs 71k cycles).
 
 ## Gotcha: `arm-none-eabi-size` counts code in SRAM as text
