@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model as Firmware — Live</title>
+<style>
+:root {
+  --bg: #0B0E11; --panel: #12171C; --panel2: #181E24; --line: #242C34; --line2: #343D46;
+  --text: #E7ECF0; --text2: #C3C9CE; --muted: #A0AAB4; --dim: #7D8893;
+  --ok: #3DDC97; --ok-bg: #10261D; --ok-line: #1D4A37;
+  --warn: #F5B544; --warn-line: #5A4618;
+  --bad: #FF7B7B; --bad-strong: #FF5C5C; --bad-bg: #1E1214;
+  --t-neg: #F0803C; --t-zero: #262E36; --t-pos: #6CB4FF;
+  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 Inter, system-ui, 'Segoe UI', sans-serif; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 16px 40px; display: flex; flex-direction: column; gap: 16px; }
+@media (min-width: 700px) { .wrap { padding: 0 24px 40px; } }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0 4px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; color: var(--muted); }
+h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -.01em; }
+h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.seg { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.seg button { border: 0; border-radius: 7px; padding: 10px 16px; min-height: 44px; cursor: pointer; font: inherit; font-weight: 500; background: transparent; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { font-family: var(--mono); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--text2); }
+.chip.state { display: inline-flex; align-items: center; gap: 8px; }
+.chip.state .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.chip.streaming { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok); }
+.chip.streaming .dot { animation: blink 1.2s ease-in-out infinite; }
+.chip.paused { color: var(--warn); border-color: var(--warn-line); }
+.chip.disconnected { color: var(--bad); border-color: #6A2E33; }
+.chip.done { color: var(--text); }
+@keyframes blink { 50% { opacity: .3; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.kpi .k { font-size: 12px; color: var(--muted); }
+.kpi .v { font-family: var(--mono); font-size: 24px; font-weight: 500; }
+.kpi .s { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.progress { height: 4px; border-radius: 2px; background: #232A31; overflow: hidden; }
+.progress div { height: 100%; background: var(--ok); width: 0; }
+.blocks { display: flex; flex-wrap: wrap; gap: 8px; }
+.block { flex: 1 1 128px; min-width: 0; min-height: 140px; text-align: left; cursor: pointer; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; color: var(--text); display: flex; flex-direction: column; gap: 6px; font: inherit; transition: border-color .15s, background .15s; }
+.block[aria-pressed="true"] { border-color: var(--ok); background: #13201C; }
+.block.active { box-shadow: 0 0 0 2px #FFFFFF inset; }
+.block .nm { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+.block .sw { width: 10px; height: 10px; border-radius: 2px; }
+.block .op { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.block .sh { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.block .tm { margin-top: auto; display: flex; justify-content: space-between; gap: 6px; font-family: var(--mono); font-size: 13px; }
+.block .tm span + span { color: var(--muted); }
+.block .bar { display: block; height: 4px; background: #232A31; border-radius: 2px; overflow: hidden; }
+.block .bar span { display: block; height: 100%; }
+.track { position: relative; display: flex; height: 36px; border-radius: 6px; overflow: hidden; background: var(--bg); }
+.track .s { min-width: 2px; display: flex; align-items: center; padding-left: 8px; overflow: hidden; color: var(--bg); font-size: 12px; font-weight: 600; white-space: nowrap; border-right: 1px solid var(--bg); }
+.cursor { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: #fff; box-shadow: 0 0 10px 2px rgba(255,255,255,.55); }
+.axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.btn { min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line2); background: var(--panel2); color: var(--text); cursor: pointer; font: inherit; }
+.btn.primary { background: var(--text); color: var(--bg); border: 0; font-weight: 600; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:focus-visible, .block:focus-visible, .seg button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--t-pos); outline-offset: 2px; }
+label.inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+select { min-height: 44px; border-radius: 8px; border: 1px solid var(--line2); background: var(--panel2); color: var(--text); padding: 0 10px; font: inherit; }
+input[type=range] { flex: 1 1 200px; accent-color: var(--text); min-height: 44px; }
+.row2 { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+.row2 > .panel:first-child { flex: 999 1 560px; }
+.row2 > .panel:last-child { flex: 1 1 360px; }
+.maps { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; }
+.maps figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.maps canvas { width: 100%; aspect-ratio: 1; image-rendering: pixelated; border-radius: 4px; background: var(--bg); }
+.maps figcaption { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+canvas.px { image-rendering: pixelated; display: block; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; font-size: 13px; }
+.legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+.big { font-family: var(--mono); font-size: 40px; line-height: 1.1; }
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.badge.ok { color: var(--ok); } .badge.warn { color: var(--warn); } .badge.bad { color: var(--bad); }
+.logit { display: grid; grid-template-columns: 16px minmax(0, 1fr) minmax(72px, max-content); gap: 10px; align-items: center; }
+.logit .lb { position: relative; height: 12px; background: var(--panel2); border-radius: 2px; }
+.logit .lb .z { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: #4A535C; }
+.logit .lb .f { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.logit span { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.logit span:last-child { text-align: right; font-size: 12px; white-space: nowrap; }
+.logit.top span { color: var(--text); font-weight: 700; }
+.banner { border-radius: 14px; padding: 16px 18px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.banner.bad { background: var(--bad-bg); border: 2px solid var(--bad-strong); }
+.banner.lost { background: var(--panel); border: 1px dashed #4A535C; }
+.banner.done { background: var(--panel); border: 1px solid var(--ok-line); }
+.banner .t { font-weight: 700; }
+.banner.bad .t { color: var(--bad); }
+table.diff { border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+table.diff th, table.diff td { padding: 4px 10px; text-align: right; }
+table.diff tr.x { background: #3A1A1D; color: var(--bad); font-weight: 700; }
+.ruler { position: relative; min-width: 640px; height: 128px; }
+.ruler .rail { position: absolute; left: 0; right: 0; top: 58px; height: 8px; border-radius: 4px; background: var(--panel2); }
+.ruler .mk { position: absolute; top: 54px; height: 16px; width: 2px; background: var(--muted); }
+.ruler .lbl { position: absolute; transform: translateX(-50%); text-align: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.ruler .bar { position: absolute; top: 38px; height: 48px; border-left: 2px dashed var(--warn); }
+.ruler .band { position: absolute; top: 54px; height: 16px; border-radius: 3px; background: var(--ok); opacity: .35; }
+.ruler .now { position: absolute; top: 46px; height: 32px; width: 2px; background: var(--ok); }
+.ruler .tick { position: absolute; top: 106px; font-family: var(--mono); font-size: 11px; color: var(--dim); transform: translateX(-50%); }
+.scrollx { overflow-x: auto; }
+.hidden { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <div class="eyebrow">MODEL AS FIRMWARE</div>
+    <h1>Live execution</h1>
+  </div>
+  <div class="seg" role="group" aria-label="Mode">
+    <button type="button" data-mode="live" aria-pressed="true">Live</button>
+    <button type="button" data-mode="slow" aria-pressed="false">Slow-mo ×1000</button>
+    <button type="button" data-mode="replay" aria-pressed="false">Replay</button>
+  </div>
+  <div class="chips">
+    <span id="state" class="chip state" role="status" aria-live="polite"><span class="dot"></span><span id="stateText">CONNECTING</span></span>
+    <span id="chipPort" class="chip hidden"></span>
+    <span id="chipBuild" class="chip">—</span>
+    <span id="chipModel" class="chip">—</span>
+    <span id="chipHz" class="chip hidden"></span>
+  </div>
+</header>
+
+<div id="banner" class="banner hidden" role="alert"></div>
+
+<section class="kpis" aria-label="Run summary">
+  <div class="kpi"><span class="k">Images</span><span class="v" id="kN">0</span><div class="progress"><div id="kProg"></div></div></div>
+  <div class="kpi"><span class="k">Golden match</span><span class="v" id="kGold">—</span><span class="s" id="kGoldS">&nbsp;</span></div>
+  <div class="kpi"><span class="k">Accuracy vs labels</span><span class="v" id="kAcc">—</span><span class="s" id="kAccS">&nbsp;</span></div>
+  <div class="kpi"><span class="k">Agrees with PyTorch</span><span class="v" id="kPt">—</span><span class="s" id="kPtS">&nbsp;</span></div>
+  <div class="kpi"><span class="k">Latency per image</span><span class="v" id="kLat">—</span><span class="s" id="kLatS">&nbsp;</span></div>
+  <div class="kpi"><span class="k">Throughput</span><span class="v" id="kRate">—</span><span class="s" id="kRateS">&nbsp;</span></div>
+</section>
+
+<section class="panel" aria-labelledby="pipeH">
+  <div class="panel-head">
+    <h2 id="pipeH">Pipeline</h2>
+    <span class="note">Click a layer to inspect it. Time and share are the board's cycle counts per stage.</span>
+  </div>
+  <div class="blocks" id="blocks"></div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="panel-head">
+      <span id="trackTitle" style="font-size:13px;font-weight:500">One image</span>
+      <span id="trackCaption" class="note"></span>
+    </div>
+    <div class="track" id="track"><div class="cursor" id="cursor" aria-hidden="true"></div></div>
+    <div class="axis" id="axis" aria-hidden="true"></div>
+  </div>
+  <div class="controls">
+    <button type="button" class="btn" id="bPause">Pause</button>
+    <button type="button" class="btn" id="bStep">Step one image</button>
+    <label class="inline">Speed
+      <select id="rate">
+        <option value="1">1 image/s</option>
+        <option value="5">5 images/s</option>
+        <option value="20">20 images/s</option>
+        <option value="60">60 images/s</option>
+        <option value="0">As fast as it goes</option>
+      </select>
+    </label>
+    <button type="button" class="btn" id="bRestart">Restart run</button>
+  </div>
+  <div class="controls hidden" id="replayRow">
+    <button type="button" class="btn" id="rPrevImg">‹ Image</button>
+    <button type="button" class="btn" id="rPrevStage">‹ Stage</button>
+    <button type="button" class="btn" id="rNextStage">Stage ›</button>
+    <button type="button" class="btn" id="rNextImg">Image ›</button>
+    <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Image in this run">
+    <span class="mono note" id="scrubLbl">no images yet</span>
+  </div>
+</section>
+
+<div class="row2">
+  <section class="panel" aria-labelledby="insH">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span class="eyebrow" style="font-size:11px">INSPECTOR · IMAGE <span id="insIdx">—</span></span>
+      <h2 id="insH">—</h2>
+      <p class="note" id="insDesc" style="max-width:72ch"></p>
+    </div>
+    <div id="insBody"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="imgH">
+    <div class="panel-head">
+      <h2 id="imgH">Current image</h2>
+      <span class="mono note" id="imgIdx">—</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+      <canvas id="imgCanvas" class="px" width="16" height="16" style="width:160px;height:160px;border-radius:4px;background:var(--bg)" role="img" aria-label="Input digit, 16 by 16 pixels"></canvas>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:24px">
+          <div style="display:flex;flex-direction:column"><span class="note" style="font-size:12px">Label</span><span class="big" id="imgLabel" style="color:var(--text2)">—</span></div>
+          <div style="display:flex;flex-direction:column"><span class="note" style="font-size:12px">Predicted</span><span class="big" id="imgPred" style="font-weight:700">—</span></div>
+        </div>
+        <div id="badges" style="display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <span style="font-size:13px;font-weight:500">Logits</span>
+      <div id="logits" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+  </section>
+</div>
+
+<section class="panel" aria-labelledby="latH">
+  <div class="panel-head">
+    <h2 id="latH">Latency against the bar</h2>
+    <span class="note">Markers: the latest results/phase0.csv run per build for this model. Green: this run.</span>
+  </div>
+  <div class="scrollx"><div class="ruler" id="ruler"></div></div>
+  <p class="note" id="rulerNote"></p>
+</section>
+
+</div>
+
+<script>
+'use strict';
+// ---------- static description of the network (CNNMNIST layout, 80 channels) ----------
+const LAYERS = [
+  { id: 'input', name: 'Input', op: '16×16 int8 image', shape: '1×16×16', color: '#E7ECF0', kind: 'input',
+    title: 'Input · 16×16 int8', desc: 'The image exactly as the board receives it: 256 signed bytes, drawn as grey levels.' },
+  { id: 'conv1', name: 'Conv1', op: 'Conv 3×3 · 1→80', shape: '80×14×14', color: '#7C6CFF', kind: 'maps',
+    title: 'Conv1 · 80 feature maps, 14×14', desc: 'Each small map is one channel. From the golden model, which matches the board bit for bit.' },
+  { id: 'dw1', name: 'DW1', op: 'Depthwise 3×3', shape: '80×12×12', color: '#A398FF', kind: 'maps',
+    title: 'DW1 · depthwise conv, 12×12', desc: 'Each channel filtered by its own 3×3 kernel, then ReLU.' },
+  { id: 'pool1', name: 'Pool1', op: 'MaxPool 2×2', shape: '80×6×6', color: '#5E6873', kind: 'maps',
+    title: 'Pool1 · max-pool to 6×6', desc: 'Each 2×2 block keeps its largest value.' },
+  { id: 'dw2', name: 'DW2', op: 'Depthwise 3×3', shape: '80×4×4', color: '#C9C2FF', kind: 'maps',
+    title: 'DW2 · depthwise conv, 4×4', desc: 'The second depthwise filter.' },
+  { id: 'pool2', name: 'Pool2', op: 'MaxPool 2×2', shape: '80×2×2 → 320', color: '#8A939C', kind: 'maps',
+    title: 'Pool2 · 2×2 per channel', desc: '80 channels × 4 values are flattened into the 320 inputs of FC1.' },
+  { id: 'fc1', name: 'FC1', op: '320→96 · ternary w', shape: '96', color: '#E2B84F', kind: 'ternary',
+    title: 'FC1 · ternary weights −1 / 0 / +1', desc: 'No multiplies: each +1 adds its input, each −1 subtracts it, each 0 is skipped.' },
+  { id: 'fc2', name: 'FC2', op: '96→64 · 4-bit w', shape: '64', color: '#ECCF86', kind: 'vector',
+    title: 'FC2 · 96→64', desc: 'Activations after FC2 and its rescale.' },
+  { id: 'fc3', name: 'FC3', op: '64→10 · 4-bit w', shape: '10 logits', color: '#F5E4B8', kind: 'logits',
+    title: 'FC3 · 64→10 logits', desc: 'One score per digit. The prediction is the index of the first maximum.' }
+];
+const STAGE_IDS = LAYERS.slice(1).map(l => l.id);
+const HEAT = ['#141A20', '#153230', '#184740', '#1C5D50', '#227362', '#2A8A74', '#35A287', '#47BB9B', '#63D5B0'].map(hex);
+const TERN = { n: hex('#F0803C'), z: hex('#262E36'), p: hex('#6CB4FF') };
+const MAX_MAPS = 16;
+
+// ---------- state ----------
+const S = {
+  info: null, status: null, summary: null, stages: null,
+  results: [], latest: null,
+  mode: 'live', sel: 'conv1', viewIdx: 0, showAll: false,
+  act: null, actIdx: -1, actPending: false, lastActFetch: 0,
+  weights: null, phase0: [], rate: null, paused: false,
+  slow: { start: 0, dur: 8000, idx: -1, waiting: false, hold: false, heldAt: 0 }
+};
+
+// ---------- helpers ----------
+function hex(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 0) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'style') e.style.cssText = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+}
+function heatAt(t) { // t in 0..1 -> rgb on the HEAT ramp
+  const x = Math.max(0, Math.min(1, t)) * (HEAT.length - 1), i = Math.min(HEAT.length - 2, Math.floor(x)), f = x - i;
+  return HEAT[i].map((c, k) => Math.round(c + (HEAT[i + 1][k] - c) * f));
+}
+function drawGrid(canvas, w, h, rgbAt) {
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d'), im = ctx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) { const c = rgbAt(i); im.data.set([c[0], c[1], c[2], 255], i * 4); }
+  ctx.putImageData(im, 0, 0);
+}
+async function post(q) {
+  try { const r = await fetch('/control?' + q, { method: 'POST' }); return await r.json(); } catch (e) { return null; }
+}
+function hz() { return S.info && S.info.sys_hz ? S.info.sys_hz : 0; }
+function stageMs() { // per-stage ms from the latest stages event, or null
+  if (!S.stages || !hz()) return null;
+  return STAGE_IDS.map(id => (S.stages.cycles[id] || 0) / hz() * 1e3);
+}
+
+// ---------- event stream ----------
+function connect() {
+  const es = new EventSource('/events');
+  es.onmessage = m => handle(JSON.parse(m.data));
+  es.onerror = () => { setState({ state: 'disconnected', reason: 'lost the bridge at ' + location.host + '; retrying' }); };
+}
+function handle(ev) {
+  switch (ev.type) {
+    case 'reset': S.results = []; S.latest = null; S.summary = null; S.act = null; S.actIdx = -1; break;
+    case 'info': S.info = ev; renderInfo(); loadPhase0(); break;
+    case 'status': setState(ev); break;
+    case 'stages': S.stages = ev; break;
+    case 'summary': S.summary = ev; if (ev.final && S.status && S.status.state === 'done') renderBanner(); break;
+    case 'result': {
+      const { img, golden_logits, ...compact } = ev;
+      S.results[ev.idx] = compact;
+      S.latest = ev;
+      if (S.mode === 'slow') S.slow.waiting = false, startSlow(ev.idx);
+      break;
+    }
+  }
+  schedule();
+}
+function setState(ev) {
+  S.status = ev;
+  if (ev.rate != null) { S.rate = ev.rate; $('rate').value = String(ev.rate); }
+  if (ev.state === 'paused' || ev.state === 'streaming') S.paused = ev.state === 'paused';
+  const chip = $('state');
+  chip.className = 'chip state ' + ev.state;
+  $('stateText').textContent = ev.state.toUpperCase();
+  updatePauseLabel();
+  renderBanner();
+}
+
+// ---------- rendering (coalesced to one frame) ----------
+let queued = false;
+function schedule() { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; render(); }); } }
+
+function render() {
+  renderKpis();
+  renderBlocks();
+  renderTrack();
+  renderReplayRow();
+  renderCurrent();
+  maybeFetchActivations();
+  renderRuler();
+}
+
+function renderInfo() {
+  const i = S.info;
+  $('chipBuild').textContent = 'build ' + (i.build || i.target);
+  $('chipModel').textContent = i.model;
+  $('chipPort').textContent = i.port; $('chipPort').classList.toggle('hidden', !i.port);
+  $('chipHz').textContent = (i.sys_hz / 1e6) + ' MHz'; $('chipHz').classList.toggle('hidden', !i.sys_hz);
+  if (i.rate != null) { S.rate = i.rate; $('rate').value = String(i.rate); }
+}
+
+function renderBanner() {
+  const b = $('banner'), st = S.status;
+  b.replaceChildren();
+  b.className = 'banner hidden';
+  if (!st) return;
+  const mismatch = st.state === 'paused' && /golden/.test(st.reason || '');
+  if (mismatch) {
+    b.className = 'banner bad';
+    b.append(
+      el('div', { style: 'display:flex;flex-direction:column;gap:4px' },
+        el('span', { class: 't' }, 'Correctness failure: board ≠ golden model'),
+        el('span', { style: 'color:#E7C9C9' }, `Image #${st.idx}: the board's logits differ. The run is paused.`)),
+      el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
+        el('button', { type: 'button', class: 'btn', style: 'background:#FF5C5C;color:#1E1214;border:0;font-weight:700', onclick: () => { setMode('replay'); S.viewIdx = st.idx; S.sel = 'fc3'; schedule(); } }, 'Open in replay'),
+        el('button', { type: 'button', class: 'btn', onclick: () => post('cmd=resume') }, 'Resume anyway')));
+  } else if (st.state === 'disconnected') {
+    b.className = 'banner lost';
+    b.append(el('div', { style: 'display:flex;flex-direction:column;gap:4px' },
+      el('span', { class: 't' }, 'Disconnected'), el('span', { class: 'note' }, st.reason || '')),
+      el('button', { type: 'button', class: 'btn primary', onclick: () => post('cmd=restart') }, 'Restart run'));
+  } else if (st.state === 'done') {
+    b.className = 'banner done';
+    const s = S.summary || {};
+    b.append(el('span', {}, el('span', { class: 't', style: 'color:var(--ok)' }, 'Run complete. '),
+      `${fmt(s.n)} images, golden match ${fmt(s.golden_match_pct, 2)}%, accuracy ${fmt(s.accuracy_pct, 2)}%.`),
+      el('button', { type: 'button', class: 'btn', onclick: () => setMode('replay') }, 'Replay it'));
+  }
+}
+
+function renderKpis() {
+  const s = S.summary || {}, total = S.info ? S.info.n_images : 0;
+  $('kN').textContent = fmt(s.n || 0);
+  $('kN').append(el('span', { style: 'color:var(--dim);font-size:15px' }, ' / ' + fmt(total)));
+  $('kProg').style.width = total ? ((s.n || 0) / total * 100) + '%' : '0';
+  const g = $('kGold');
+  g.textContent = s.golden_match_pct != null ? fmt(s.golden_match_pct, 2) + '%' : '—';
+  g.style.color = s.mismatches ? 'var(--bad)' : (s.n ? 'var(--ok)' : '');
+  $('kGoldS').textContent = s.n ? `${fmt(s.mismatches)} logit mismatch${s.mismatches === 1 ? '' : 'es'}` : '';
+  $('kAcc').textContent = s.accuracy_pct != null ? fmt(s.accuracy_pct, 2) + '%' : '—';
+  $('kAccS').textContent = s.n ? `${fmt(s.wrong)} wrong of ${fmt(s.n)}` : '';
+  $('kPt').textContent = s.pytorch_agree_pct != null ? fmt(s.pytorch_agree_pct, 2) + '%' : '—';
+  $('kPtS').textContent = s.pytorch_agree_pct != null ? 'same prediction as the float model' : (s.n ? 'check skipped' : '');
+  if (s.latency_ms_mean != null) {
+    $('kLat').textContent = fmt(s.latency_ms_mean, 2) + ' ms';
+    $('kLatS').textContent = `min ${fmt(s.latency_ms_min, 2)} · max ${fmt(s.latency_ms_max, 2)}`;
+  } else {
+    $('kLat').textContent = '—';
+    $('kLatS').textContent = S.info && !S.info.sys_hz ? 'no cycle counter on this target' : '';
+  }
+  $('kRate').textContent = s.images_per_s != null ? fmt(s.images_per_s, 1) : '—';
+  $('kRateS').textContent = 'images/s incl. USB · speed ' + (S.rate ? S.rate + '/s' : 'unthrottled');
+}
+
+function renderBlocks() {
+  const ms = stageMs(), total = ms ? ms.reduce((a, b) => a + b, 0) : 0;
+  const box = $('blocks');
+  if (!box.childElementCount) {
+    for (const l of LAYERS) {
+      box.append(el('button', { type: 'button', class: 'block', 'data-id': l.id, onclick: () => { S.sel = l.id; schedule(); } },
+        el('span', { class: 'nm' }, el('span', { class: 'sw', style: 'background:' + l.color }), l.name),
+        el('span', { class: 'op' }, l.op), el('span', { class: 'sh' }, l.shape),
+        el('span', { class: 'tm' }, el('span', { class: 'ms' }, '—'), el('span', { class: 'pc' }, '')),
+        el('span', { class: 'bar' }, el('span', { style: 'width:0;background:' + l.color }))));
+    }
+  }
+  const active = activeStage();
+  for (const b of box.children) {
+    const id = b.dataset.id, k = STAGE_IDS.indexOf(id);
+    b.setAttribute('aria-pressed', String(id === S.sel));
+    b.classList.toggle('active', id === active);
+    const has = ms && k >= 0;
+    b.querySelector('.ms').textContent = has ? fmt(ms[k], 2) + ' ms' : (k >= 0 ? '—' : '');
+    b.querySelector('.pc').textContent = has ? fmt(ms[k] / total * 100, 1) + '%' : '';
+    b.querySelector('.bar span').style.width = has ? (ms[k] / total * 100) + '%' : '0';
+  }
+}
+
+function renderTrack() {
+  const ms = stageMs(), track = $('track');
+  const total = ms ? ms.reduce((a, b) => a + b, 0) : 0;
+  const shares = ms ? ms.map(v => v / total * 100) : STAGE_IDS.map(() => 100 / STAGE_IDS.length);
+  if (track.childElementCount === 1) {
+    LAYERS.slice(1).forEach(l => track.insertBefore(el('div', { class: 's', style: 'background:' + l.color }), $('cursor')));
+  }
+  [...track.querySelectorAll('.s')].forEach((d, k) => {
+    d.style.flex = '0 0 ' + shares[k] + '%';
+    d.textContent = shares[k] >= 5 ? LAYERS[k + 1].name : '';
+    d.title = LAYERS[k + 1].name + (ms ? ` · ${fmt(ms[k], 2)} ms · ${fmt(shares[k], 1)}%` : '');
+  });
+  $('trackTitle').textContent = ms
+    ? `One image: ${fmt(S.stages.cycles ? Object.values(S.stages.cycles).reduce((a, b) => a + b, 0) : 0)} cycles = ${fmt(total, 2)} ms (image #${S.stages.idx})`
+    : (S.info && S.info.sys_hz ? 'Flash a *_prof build to see time per stage' : 'No cycle counter on this target: stages drawn at equal width');
+  $('axis').replaceChildren(...(ms ? [0, .25, .5, .75, 1].map(f => el('span', {}, f === 1 ? fmt(total, 2) + ' ms' : fmt(total * f, 1))) : []));
+  const cap = { live: 'One sweep per image, drawn at 1/100 speed', slow: '1000× slower, one image at a time; the inspector follows the cursor', replay: 'Step through this run by image or by stage' };
+  $('trackCaption').textContent = cap[S.mode];
+}
+
+// cursor animation: live = decorative sweep at 1/100 speed; slow = real proportions at 1/1000 speed
+function animate(now) {
+  const c = $('cursor');
+  const ms = stageMs(), total = ms ? ms.reduce((a, b) => a + b, 0) : 10;
+  if (S.mode === 'live' && !S.paused) {
+    const period = total * 100;
+    c.style.left = ((now % period) / period * 100) + '%';
+  } else if (S.mode === 'slow') {
+    const f = Math.min(1, ((S.slow.hold ? S.slow.heldAt : now) - S.slow.start) / S.slow.dur);
+    c.style.left = (f * 100) + '%';
+    const st = stageAt(f * 100);
+    if (st !== S.slow.stage) { S.slow.stage = st; S.sel = st; schedule(); }
+    if (f >= 1 && !S.slow.waiting && !S.slow.hold) { S.slow.waiting = true; post('cmd=step'); }
+  } else if (S.mode === 'replay') {
+    const k = STAGE_IDS.indexOf(S.sel), ms2 = ms || STAGE_IDS.map(() => 1), t = ms2.reduce((a, b) => a + b, 0);
+    const before = k < 0 ? 0 : ms2.slice(0, k + 1).reduce((a, b) => a + b, 0);
+    c.style.left = (before / t * 100) + '%';
+  }
+  requestAnimationFrame(animate);
+}
+function stageAt(pct) {
+  const ms = stageMs() || STAGE_IDS.map(() => 1), t = ms.reduce((a, b) => a + b, 0);
+  let acc = 0;
+  for (let k = 0; k < ms.length; k++) { acc += ms[k] / t * 100; if (pct <= acc) return STAGE_IDS[k]; }
+  return STAGE_IDS[STAGE_IDS.length - 1];
+}
+function activeStage() { return S.mode === 'slow' ? S.slow.stage : null; }
+function startSlow(idx) {
+  const ms = stageMs();
+  S.slow.idx = idx; S.slow.start = performance.now();
+  S.slow.dur = ms ? ms.reduce((a, b) => a + b, 0) * 1000 : 8000;
+}
+
+function setMode(m) {
+  const prev = S.mode;
+  S.mode = m;
+  document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  if (m === 'slow') { post('cmd=pause'); startSlow(S.latest ? S.latest.idx : 0); S.slow.waiting = false; }
+  if (m === 'live' && prev === 'slow') { post('cmd=resume'); }
+  if (m === 'replay') { S.viewIdx = S.latest ? S.latest.idx : 0; }
+  S.slow.hold = false;
+  updatePauseLabel();
+  schedule();
+}
+
+function renderReplayRow() {
+  $('replayRow').classList.toggle('hidden', S.mode !== 'replay');
+  const n = S.results.length, sc = $('scrub');
+  sc.max = String(Math.max(0, n - 1));
+  if (S.mode === 'replay') sc.value = String(S.viewIdx);
+  $('scrubLbl').textContent = n ? `#${fmt(S.viewIdx)} · ${fmt(n)} received` : 'no images yet';
+}
+
+function shownIdx() { return S.mode === 'replay' ? S.viewIdx : (S.latest ? S.latest.idx : -1); }
+
+// ---------- current image ----------
+function renderCurrent() {
+  const idx = shownIdx();
+  let src = null;
+  if (S.latest && S.latest.idx === idx) src = { img: S.latest.img, res: S.latest, golden_logits: S.latest.golden_logits };
+  else if (S.act && S.act.idx === idx) src = { img: S.act.img, res: S.act.result, golden_logits: S.act.golden_logits };
+  $('imgIdx').textContent = idx >= 0 ? `#${fmt(idx)}${S.info ? ' of ' + fmt(S.info.n_images) : ''}` : '—';
+  if (!src || !src.res) return;
+  const { img, res } = src;
+  const lo = Math.min(...img), hi = Math.max(...img), span = Math.max(1, hi - lo);
+  drawGrid($('imgCanvas'), 16, 16, i => { const g = Math.round((img[i] - lo) / span * 255); return [g, g, g]; });
+  $('imgLabel').textContent = res.label;
+  const p = $('imgPred');
+  p.textContent = res.pred;
+  p.style.color = !res.golden_ok ? 'var(--bad)' : (res.pred === res.label ? 'var(--ok)' : 'var(--warn)');
+  const check = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
+  const cross = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+  const badge = (cls, icon, text) => { const s = el('span', { class: 'badge ' + cls }); s.innerHTML = icon; s.append(text); return s; };
+  $('badges').replaceChildren(...[
+    res.golden_ok ? badge('ok', check, 'Logits match golden') : badge('bad', cross, 'Logits differ from golden'),
+    res.pred === res.label ? badge('ok', check, 'Correct vs label') : badge('warn', cross, 'Wrong vs label'),
+    res.torch_pred == null ? null : (res.torch_pred === res.pred ? badge('ok', check, 'Same as PyTorch') : badge('warn', cross, `PyTorch says ${res.torch_pred}`))].filter(Boolean));
+  const lg = res.logits, gl = src.golden_logits, maxAbs = Math.max(1, ...lg.map(Math.abs));
+  const top = lg.indexOf(Math.max(...lg));
+  $('logits').replaceChildren(...lg.map((v, i) => {
+    const w = Math.abs(v) / maxAbs * 50, left = v < 0 ? 50 - w : 50, diff = gl && gl[i] !== v;
+    return el('div', { class: 'logit' + (i === top ? ' top' : '') },
+      el('span', {}, String(i)),
+      el('div', { class: 'lb' }, el('div', { class: 'z' }),
+        el('div', { class: 'f', style: `left:${left}%;width:${w}%;background:${diff ? 'var(--bad-strong)' : (v >= 0 ? 'var(--ok)' : '#4A535C')}` })),
+      el('span', { style: diff ? 'color:var(--bad)' : '' }, fmt(v) + (diff ? ` ≠ ${fmt(gl[i])}` : '')));
+  }));
+}
+
+// ---------- inspector ----------
+function maybeFetchActivations() {
+  const idx = shownIdx();
+  if (idx < 0 || S.actPending || S.actIdx === idx) { renderInspector(); return; }
+  const now = performance.now();
+  if (S.mode === 'live' && !S.paused && now - S.lastActFetch < 400) {
+    renderInspector();
+    if (!S.actTimer) S.actTimer = setTimeout(() => { S.actTimer = 0; schedule(); }, 420);
+    return;
+  }
+  S.actPending = true; S.lastActFetch = now;
+  fetch('/activations?idx=' + idx).then(r => r.json()).then(a => { S.act = a; S.actIdx = a.idx; })
+    .catch(() => {}).finally(() => { S.actPending = false; schedule(); });
+  renderInspector();
+}
+
+let lastInspectorKey = '';
+function renderInspector() {
+  const l = LAYERS.find(x => x.id === S.sel);
+  $('insH').textContent = l.title;
+  $('insDesc').textContent = l.desc;
+  const a = S.act;
+  $('insIdx').textContent = a ? '#' + fmt(a.idx) : '—';
+  const key = [S.sel, a ? a.idx : -1, S.showAll, S.weights ? 1 : 0].join('|');
+  if (key === lastInspectorKey) return;
+  lastInspectorKey = key;
+  const body = $('insBody');
+  if (!a) { body.replaceChildren(el('p', { class: 'note' }, 'Waiting for the first image.')); return; }
+  if (l.kind === 'input') {
+    const c = el('canvas', { class: 'px', style: 'width:320px;max-width:100%;aspect-ratio:1;border-radius:4px', role: 'img', 'aria-label': 'Input digit, 16 by 16 pixels' });
+    const img = a.img, lo = Math.min(...img), span = Math.max(1, Math.max(...img) - lo);
+    drawGrid(c, 16, 16, i => { const g = Math.round((img[i] - lo) / span * 255); return [g, g, g]; });
+    body.replaceChildren(c);
+  } else if (l.kind === 'maps') {
+    const L = a.layers[l.id], [C, H, W] = L.shape, d = L.data, n = H * W;
+    const sums = Array.from({ length: C }, (_, c) => { let s = 0; for (let i = 0; i < n; i++) s += d[c * n + i]; return [s, c]; });
+    const order = S.showAll ? sums.map(x => x[1]) : sums.sort((x, y) => y[0] - x[0]).slice(0, MAX_MAPS).map(x => x[1]);
+    const figs = order.map(c => {
+      let mx = 0; for (let i = 0; i < n; i++) mx = Math.max(mx, d[c * n + i]);
+      const cv = el('canvas', { 'aria-hidden': 'true' });
+      drawGrid(cv, W, H, i => heatAt(mx ? d[c * n + i] / mx : 0));
+      return el('figure', {}, cv, el('figcaption', {}, 'ch ' + c));
+    });
+    const toggle = el('button', { type: 'button', class: 'btn', onclick: () => { S.showAll = !S.showAll; schedule(); } },
+      S.showAll ? `Show the ${MAX_MAPS} most active` : `Show all ${C} channels`);
+    body.replaceChildren(
+      el('div', { style: 'display:flex;flex-direction:column;gap:14px' },
+        el('div', { class: 'legend' }, el('span', { class: 'note' }, S.showAll ? `All ${C} channels in order` : `${MAX_MAPS} most active of ${C} channels`),
+          heatLegend(), toggle),
+        el('div', { class: 'maps' }, ...figs)));
+  } else if (l.kind === 'ternary') {
+    if (!S.weights) { fetch('/weights').then(r => r.json()).then(w => { S.weights = w; schedule(); }); body.replaceChildren(el('p', { class: 'note' }, 'Loading weights…')); return; }
+    const w = S.weights, [R, Cn] = w.shape, tot = R * Cn, cnt = w.counts;
+    const cv = el('canvas', { class: 'px', style: 'width:100%;border-radius:4px', role: 'img', 'aria-label': `FC1 ternary weight matrix, ${R} by ${Cn}` });
+    drawGrid(cv, Cn, R, i => TERN[w.rows[Math.floor(i / Cn)][i % Cn]]);
+    cv.style.aspectRatio = `${Cn} / ${R}`;
+    const sw = (c, b) => el('span', { class: 'sw', style: `background:${c}${b ? ';outline:1px solid #4A535C' : ''}` });
+    body.replaceChildren(el('div', { style: 'display:flex;flex-direction:column;gap:14px' },
+      el('div', { class: 'legend' },
+        el('span', {}, sw('#F0803C'), '−1', el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.neg)} · ${fmt(cnt.neg / tot * 100, 1)}%`)),
+        el('span', {}, sw('#262E36', 1), '0', el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.zero)} · ${fmt(cnt.zero / tot * 100, 1)}%`)),
+        el('span', {}, sw('#6CB4FF'), '+1', el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.pos)} · ${fmt(cnt.pos / tot * 100, 1)}%`)),
+        el('span', { class: 'mono note' }, `${fmt(tot)} weights`)),
+      el('figure', { style: 'margin:0;display:flex;flex-direction:column;gap:6px' }, cv,
+        el('figcaption', { class: 'note', style: 'font-size:12px' }, `All ${R} outputs (rows) × ${Cn} inputs (columns).`)),
+      vectorStrip('FC1 output for this image', a.layers.fc1.data)));
+  } else if (l.kind === 'vector') {
+    body.replaceChildren(vectorStrip('FC2 output for this image', a.layers.fc2.data));
+  } else {
+    body.replaceChildren(el('p', { class: 'note', style: 'color:var(--text2)' },
+      'FC3 writes the 10 raw logits shown under Current image: ' + a.layers.fc3.data.map(v => fmt(v)).join(', ') + ' (golden model).'));
+  }
+}
+function vectorStrip(title, data) {
+  const cols = 32, rows = Math.ceil(data.length / cols), mx = Math.max(1, ...data);
+  const cv = el('canvas', { class: 'px', style: `width:100%;aspect-ratio:${cols} / ${rows};border-radius:3px`, 'aria-hidden': 'true' });
+  drawGrid(cv, cols, rows, i => i < data.length ? heatAt(data[i] / mx) : [11, 14, 17]);
+  return el('div', { style: 'display:flex;flex-direction:column;gap:6px' },
+    el('span', { style: 'font-size:13px;font-weight:500' }, `${title} · ${data.length} values · max ${fmt(mx)}`), cv);
+}
+function heatLegend() {
+  const cv = el('canvas', { class: 'px', style: 'width:140px;height:8px;border-radius:2px', 'aria-hidden': 'true' });
+  drawGrid(cv, 9, 1, i => HEAT[i]);
+  return el('span', { style: 'display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)' }, '0', cv, 'channel max');
+}
+
+// ---------- latency ruler ----------
+async function loadPhase0() {
+  try { S.phase0 = await (await fetch('/results')).json(); } catch (e) { S.phase0 = []; }
+  schedule();
+}
+let lastRulerKey = '';
+function renderRuler() {
+  if (!S.info) return;
+  const s = S.summary || {};
+  const latest = {};
+  for (const r of S.phase0) if (r.model === S.info.model && r.target === 'pico' && r.latency_ms_mean) latest[r.build] = r;
+  const marks = Object.values(latest).map(r => ({ build: r.build, ms: parseFloat(r.latency_ms_mean) }));
+  const live = s.latency_ms_mean != null ? s : null;
+  const key = JSON.stringify([marks, live && [live.latency_ms_mean, live.latency_ms_min, live.latency_ms_max]]);
+  if (key === lastRulerKey) return;
+  lastRulerKey = key;
+  const top = Math.max(20, ...marks.map(m => m.ms + 2), live ? live.latency_ms_max + 2 : 0);
+  const X = ms => (ms / top * 100) + '%';
+  const R = $('ruler'), kids = [el('div', { class: 'rail' })];
+  const bar = marks.find(m => m.build === 'cmsis_nn_ram');
+  if (bar) kids.push(el('div', { class: 'bar', style: 'left:' + X(bar.ms) }),
+    el('div', { class: 'lbl', style: `left:${X(bar.ms)};top:4px` }, el('span', { style: 'color:var(--warn);font-weight:600' }, 'the bar'), el('br'), el('span', { class: 'mono' }, fmt(bar.ms, 2))));
+  marks.filter(m => m !== bar).forEach((m, i) => kids.push(
+    el('div', { class: 'mk', style: 'left:' + X(m.ms) }),
+    el('div', { class: 'lbl', style: `left:${X(m.ms)};top:${i % 2 ? 4 : 78}px` }, m.build, el('br'), el('span', { class: 'mono' }, fmt(m.ms, 2)))));
+  if (bar) kids.push(el('div', { class: 'lbl', style: `left:${X(bar.ms)};top:90px` }, 'cmsis_nn_ram'));
+  if (live) kids.push(
+    el('div', { class: 'band', style: `left:${X(live.latency_ms_min)};width:calc(${X(live.latency_ms_max)} - ${X(live.latency_ms_min)} + 2px)` }),
+    el('div', { class: 'now', style: 'left:' + X(live.latency_ms_mean) }));
+  for (let t = 0; t <= top; t += 5) kids.push(el('div', { class: 'tick', style: 'left:' + X(t) }, t + (t === 0 ? ' ms' : '')));
+  R.replaceChildren(...kids);
+  $('rulerNote').textContent = live
+    ? `This run: ${fmt(live.latency_ms_mean, 2)} ms mean (band = min to max)` + (bar ? `, ${fmt(Math.abs(1 - live.latency_ms_mean / bar.ms) * 100, 1)}% ${live.latency_ms_mean < bar.ms ? 'under' : 'over'} the bar.` : '.')
+    : 'This target has no cycle counter, so only the saved board runs are shown.';
+}
+
+// ---------- controls ----------
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+$('bPause').addEventListener('click', () => {
+  if (S.mode !== 'slow') { post(S.paused ? 'cmd=resume' : 'cmd=pause'); return; }
+  // in slow-mo the bridge is always paused and stepped by the animation; Pause holds the animation
+  const now = performance.now();
+  if (S.slow.hold) S.slow.start += now - S.slow.heldAt; else S.slow.heldAt = now;
+  S.slow.hold = !S.slow.hold;
+  updatePauseLabel();
+});
+function updatePauseLabel() { $('bPause').textContent = (S.mode === 'slow' ? S.slow.hold : S.paused) ? 'Resume' : 'Pause'; }
+$('bStep').addEventListener('click', () => post('cmd=step'));
+$('bRestart').addEventListener('click', () => post('cmd=restart'));
+$('rate').addEventListener('change', e => post('rate=' + e.target.value).then(r => { if (r) { S.rate = r.rate; schedule(); } }));
+$('scrub').addEventListener('input', e => { S.viewIdx = +e.target.value; schedule(); });
+const clampIdx = i => Math.max(0, Math.min(S.results.length - 1, i));
+$('rPrevImg').addEventListener('click', () => { S.viewIdx = clampIdx(S.viewIdx - 1); schedule(); });
+$('rNextImg').addEventListener('click', () => { S.viewIdx = clampIdx(S.viewIdx + 1); schedule(); });
+const ALL_IDS = LAYERS.map(l => l.id);
+$('rPrevStage').addEventListener('click', () => { S.sel = ALL_IDS[Math.max(0, ALL_IDS.indexOf(S.sel) - 1)]; schedule(); });
+$('rNextStage').addEventListener('click', () => { S.sel = ALL_IDS[Math.min(ALL_IDS.length - 1, ALL_IDS.indexOf(S.sel) + 1)]; schedule(); });
+
+connect();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

@@ -51,6 +51,17 @@ def decode_4bitsym(words, n_in, n_out):
     return w.reshape(n_out, n_in)
 
 
+def _trace(model, img):
+    """Run one image through model._forward and keep every stage's output."""
+    out = {}
+
+    def keep(name, v):
+        out[name] = v[0]
+        return v
+    model._forward(np.asarray(img).reshape(1, -1), keep)
+    return out
+
+
 class Golden:
     def __init__(self, header):
         d, a = parse_header(header)
@@ -106,19 +117,26 @@ class Golden:
         self._bound(np.abs(a) @ np.abs(w).T)
         return a @ w.T
 
-    def logits(self, imgs):
-        """imgs [N, 256] int8 -> logits [N, 10] int64."""
+    def _forward(self, imgs, keep):
         x = imgs.astype(np.int64).reshape(-1, 1, 16, 16)
         x = np.broadcast_to(x, (x.shape[0], self.n_ch, 16, 16))
-        x = self._conv(x, self.k1)
-        x = self._conv(x, self.k2)
-        x = self._pool(x)
-        x = self._conv(x, self.k3)
-        x = self._pool(x)
+        x = keep('conv1', self._conv(x, self.k1))
+        x = keep('dw1', self._conv(x, self.k2))
+        x = keep('pool1', self._pool(x))
+        x = keep('dw2', self._conv(x, self.k3))
+        x = keep('pool2', self._pool(x))
         a = self._relu_norm(x.reshape(x.shape[0], -1))
-        a = self._relu_norm(self._fc(a, self.fc1))
-        a = self._relu_norm(self._fc(a, self.fc2))
-        return self._fc(a, self.fc3)
+        a = keep('fc1', self._relu_norm(self._fc(a, self.fc1)))
+        a = keep('fc2', self._relu_norm(self._fc(a, self.fc2)))
+        return keep('fc3', self._fc(a, self.fc3))
+
+    def logits(self, imgs):
+        """imgs [N, 256] int8 -> logits [N, 10] int64."""
+        return self._forward(imgs, lambda name, v: v)
+
+    def trace(self, img):
+        """One image [256] int8 -> {stage: output of that stage}, stage names as in the firmware's profiler."""
+        return _trace(self, img)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -172,14 +190,21 @@ class GoldenS8:
         m, s = self.q[layer]
         return requant_single_rounding(acc, m, s, lo, hi)
 
+    def _forward(self, imgs, keep):
+        x = imgs.astype(np.int64).reshape(-1, 1, 16, 16)
+        x = keep('conv1', self._rq(conv3x3_valid(x, self.k1), 'CONV1'))
+        x = keep('dw1', self._rq(conv3x3_valid(x, self.k2), 'DW1'))
+        x = keep('pool1', pool2(x))
+        x = keep('dw2', self._rq(conv3x3_valid(x, self.k3), 'DW2'))
+        x = keep('pool2', pool2(x)).reshape(x.shape[0], -1)
+        x = keep('fc1', self._rq(x @ self.fc1.T, 'FC1'))
+        x = keep('fc2', self._rq(x @ self.fc2.T, 'FC2'))
+        return keep('fc3', self._rq(x @ self.fc3.T, 'FC3', -128, 127))
+
     def logits(self, imgs):
         """imgs [N, 256] int8 -> int8 logits [N, 10] (as int64)."""
-        x = imgs.astype(np.int64).reshape(-1, 1, 16, 16)
-        x = self._rq(conv3x3_valid(x, self.k1), 'CONV1')
-        x = self._rq(conv3x3_valid(x, self.k2), 'DW1')
-        x = pool2(x)
-        x = self._rq(conv3x3_valid(x, self.k3), 'DW2')
-        x = pool2(x).reshape(x.shape[0], -1)
-        x = self._rq(x @ self.fc1.T, 'FC1')
-        x = self._rq(x @ self.fc2.T, 'FC2')
-        return self._rq(x @ self.fc3.T, 'FC3', -128, 127)
+        return self._forward(imgs, lambda name, v: v)
+
+    def trace(self, img):
+        """One image [256] int8 -> {stage: output of that stage}, stage names as in the firmware's profiler."""
+        return _trace(self, img)

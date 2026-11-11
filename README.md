@@ -32,7 +32,7 @@ Feasible as a proof of concept, but expect a solid improvement over a standard e
 | [GETTING-STARTED.md](GETTING-STARTED.md) | Wiring for the hardware on hand, Phase 0 steps to Gate 0, progress log |
 | [train/README.md](train/README.md) | How to reproduce the ternary MNIST training, local BitNetMCU patches, results |
 | [firmware/baselines/](firmware/baselines/README.md) | Plain-C reference and CMSIS-NN builds, build options |
-| [harness/](harness/README.md) | PC test harness, golden models, CMSIS-NN exporter |
+| [harness/](harness/README.md) | PC test harness, golden models, CMSIS-NN exporter, live execution view (`bridge.py` + [ui/live.html](ui/live.html)) |
 | [results/](results/README.md) | Measured numbers |
 | [notes/](notes/README.md) | Research notes, how-tos and the dated lab log |
 | [FEASIBILITY-STUDY.md](FEASIBILITY-STUDY.md) | Prior art, verification findings, architecture, ideas A–H to test, risks, sources |

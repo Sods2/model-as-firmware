@@ -2,6 +2,14 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 11 Nov 2026: live execution view (`harness/bridge.py`, `ui/live.html`)
+
+- Added a browser view of a run. It shows the pipeline with per-stage cycle shares, feature maps for each layer, FC1's ternary weights, and logits against the golden model. It also has slow-mo and replay modes and pauses with a red banner on any golden mismatch.
+- `golden.py` gained `trace(img)` (every stage's output for one image) for both golden models. `logits()` is unchanged: still 2000/2000 bit-exact against the host build.
+- The bridge picks the model from the board's INFO line. A board flashed with `tern80z90` would otherwise be checked against `tern80` and fail every image.
+- Checked on the board with a `mafc_v0_prof` build (500 images): 9.43 ms mean, 100% golden match. That figure is from the live view, not a logged run.
+- Design mockups are on a private canvas: (private link removed). It covers live view, build comparison and states. The running page follows its "Live execution" board.
+
 ## 11 Nov 2026: Phase 0 steps 4–6 (Gate 0 correctness) while parts are in the post
 
 **Hardware status:** a USB-C cable for the power meter and a Raspberry Pi Debug Probe are ordered, so step 2b (energy) waits for them. Everything below runs over the Pico's own USB.
