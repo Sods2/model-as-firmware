@@ -4,9 +4,9 @@
 
 | # | Idea | Status | Related plan idea |
 |---|---|---|---|
-| U1 | Cache placement: keep the most-used data in fast memory | Proposed | G (SRAM cache), C (DMA) |
+| U1 | Cache placement: keep the most-used data in fast memory | Proposed; U3 results say test fc1-weights-in-SRAM first | G (SRAM cache), C (DMA) |
 | U2 | Make weight unpacking cheaper | Proposed | A, E |
-| U3 | Split cores by data residency (one computes, one loads) | Proposed, test only when data doesn't fit SRAM | C, G |
+| U3 | Split cores by data residency (one computes, one loads) | Step 1 tested 11 Nov: contention is moderate on convs, strong on fc1 (see U3). Step 2 waits for a model larger than SRAM | C, G |
 | U4 | Weights as add/subtract instructions | Liked; this is idea A, next after v1 | A |
 
 ---
@@ -26,7 +26,7 @@
 **Caveat:** today's model (about 47 KB in total) fits entirely in the 520 KB SRAM, so the best placement right now is simply "everything in SRAM" (that's the `RUN_FROM_RAM` builds). This idea pays off for models larger than SRAM. That's idea G and the big-model goal, plus the Pimoroni Pico Plus 2 with 8 MB PSRAM.
 
 **Test:**
-1. Build a mixed placement: hot data in SRAM, fc1 weights in flash. Compare it with all-flash and all-SRAM.
+1. Build a mixed placement: hot data in SRAM, fc1 weights in flash. Compare it with all-flash and all-SRAM. *Update 11 Nov (U3 results):* also build the reverse, fc1's 6 KB of weights in SRAM with the rest in flash. With two cores, fc1 turned out to be the most flash-sensitive part (+55%), because its weights are evicted between inferences and both cores stream them at once.
 2. Later, on a model larger than SRAM, compare compiler-planned placement with plain flash + cache.
 3. Add a compiler pass that outputs the per-block "reads per inference ÷ size" table.
 
@@ -57,6 +57,33 @@ An asymmetric variant still worth one test now, in flash mode: one core takes th
 **Test:**
 1. Now: in the flash build, measure the two cores' "join" wait times to see if they slow each other down through the shared cache.
 2. Later: a double-buffered DMA weight stream for a model larger than SRAM, two cores computing vs one core computing plus one loading.
+
+**Result of test 1 (11 Nov 2026): the cores do slow each other down, moderately on the convs and strongly on fc1.**
+
+Method: no new code. The existing mafc v0 (one core) and v1 (two cores) builds were profiled, from flash and from SRAM, on 200 images, twice each, plus the earlier profile (`results/contention*.csv`; analysis with `harness/contention.py`). Each core's share of the conv layers in the dual build was compared with half the single-core conv time. Core 1 has no timer of its own, so its time is core 0's plus the join wait (both start within one FIFO push). Repeats agree within 0.1% on the convs and 1% on the join.
+
+| tern80, cycles | single core ÷ 2 | dual, core 0 | join wait | dual, core 1 (est.) |
+|---|---|---|---|---|
+| conv layers, flash | 506k | 565k (+11.7%) | 21.0k | 586k (+15.8%) |
+| conv layers, SRAM | 503k | 534k (+6.2%) | 11.7k | 545k (+8.5%) |
+
+| Flash penalty (flash vs SRAM, same build) | one core | two cores |
+|---|---|---|
+| conv layers | +0.7% | +5.9% (core 0), +7.5% (core 1) |
+| fc1 | +18.5% | **+54.6%** |
+
+- **Two cores cost about 6–8% each even from SRAM.** That's shared SRAM/bus traffic, not flash. It's the floor for any placement.
+- **Flash adds about 6 points more on the convs.** The join wait nearly doubles (12k -> 21k cycles), so core 1 is the one starved more. conv1 is hit hardest (+19% from flash vs +9% from SRAM).
+- **fc1 is where contention really bites.** On one core, flash already costs +18.5%: fc1's 6 KB of weights don't survive in the 16 KB XIP cache between inferences, because the conv code and data evict them. With two cores both streaming their halves at once it's +54.6%, and the second core gives only 1.40x on fc1 (1.83x from SRAM).
+- **In cycles on the critical path:** fc1 loses about 76k cycles (0.5 ms) to flash with two cores; the convs lose about 41k (core 1's half).
+
+**What follows (feeds U1):** contention does show up, so mixed placement is worth testing. But the data points at **fc1's weights** as the first thing to move into SRAM. They're only 6 KB and the most flash-sensitive part with two cores, which is the opposite of the "fc1 gains least per byte" heuristic in U1. That heuristic misses that the weights get evicted between inferences and that both cores stream them at once. Variants to build:
+
+1. fc1 weights in SRAM, everything else in flash.
+2. Conv code and weights in SRAM, fc1 weights in flash (the original U1 suggestion).
+3. Both.
+
+Compare all three with all-flash (5.80 ms) and all-SRAM (4.80 ms).
 
 ## U4. Weights as add/subtract instructions (idea A)
 

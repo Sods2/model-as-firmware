@@ -6,6 +6,7 @@
 | `phase1.csv` | Phase 1 timed runs (mafc compiler builds) |
 | `profile.csv`, `profile_stages.csv` | Profiling builds (200 images, stage counters on). Stage cycles are for test image 0 |
 | `profile_stages_dual.csv` | The same for dual-core builds (extra `join` stage: core 0 waiting for core 1) |
+| `contention.csv`, `contention_stages.csv`, `contention_stages_dual.csv` | Core-contention test: mafc v0 and v1 profiling builds, flash and SRAM, 2 repeats each. Analyse with `harness/contention.py` (notes/FINDINGS.md F12) |
 
 ## Columns (`phase0.csv`)
 

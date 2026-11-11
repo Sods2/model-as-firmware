@@ -2,6 +2,14 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 11 Nov 2026: do the two cores slow each other down? (IDEAS U3, test 1)
+
+- No new code. Profiled mafc v0 (one core) and v1 (two cores), from flash and from SRAM, twice each (`results/contention*.csv`). Compared each core's share of the conv layers with half the single-core time (`harness/contention.py`).
+- Conv layers: **+6–8% per core from SRAM** (shared SRAM/bus) and **+12–16% from flash**. The join wait is 21k cycles from flash vs 12k from SRAM, so core 1 is starved more.
+- fc1: the flash penalty is +18.5% with one core but **+54.6% with two**, so the second core gives only 1.40x there. Its 6 KB of weights get evicted between inferences and both cores stream them at once.
+- Next (U1): test fc1's weights in SRAM first, then conv code in SRAM, then both. Written up as finding F12.
+- One small thing: the single-core SRAM conv time differs by about 1% between two builds of the same source (503k vs 507k cycles), probably code layout. Comparisons of under 1% between separate builds aren't meaningful.
+
 ## 11 Nov 2026: Phase 1, compiler v1 step 1, second core
 
 - `compile.py --cores 2` splits the conv channels (40/40) and fc1/fc2 rows across both M33 cores. Core 1 runs a job loop on the SIO FIFO with DMB fences, started once by a new `ref_init()` boot hook. The PC build runs core 1's share inline, so the same split is verified there.

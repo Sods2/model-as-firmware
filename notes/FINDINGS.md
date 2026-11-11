@@ -1,6 +1,6 @@
 # Findings so far
 
-*Consolidated 11 Nov 2026, covering Phase 0 and Phase 1 up to compiler v1 (dual core). One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
+*Consolidated 11 Nov 2026, covering Phase 0 and Phase 1 up to compiler v1 (dual core) and the core-contention test. One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
 
 Setup for all numbers:
 - **Board and clock:** Raspberry Pi Pico 2 (RP2350, Cortex-M33) at 150 MHz.
@@ -72,6 +72,11 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
 ### F11. CMSIS-NN uses about 2x the flash of the ternary builds
 - **Evidence:** about 94 KB vs about 46–49 KB. Weights: about 39 KB unpacked int8 vs about 11 KB packed. The CMSIS-NN library code is the rest.
 
+### F12. The two cores slow each other down, mostly through flash, and mostly in fc1
+- **Evidence:** in the dual-core build, each core's half of the conv layers takes longer than half the single-core time: **+6–8% from SRAM**, **+12–16% from flash** (core 0 / core 1). The join wait is 21k cycles from flash against 12k from SRAM. On fc1, the flash penalty is +18.5% with one core and **+54.6% with two**. Repeats agree within 0.1–1%.
+- **Meaning:** about 6–8% is plain two-core sharing (SRAM and bus), which no placement removes. On top of that, flash costs about 41k critical-path cycles in the convs and about 76k in fc1. fc1's weights (only 6 KB) are evicted from the 16 KB XIP cache between inferences and then streamed by both cores at once. Moving **fc1's weights to SRAM** is the cheapest likely fix, ahead of moving the conv code. Test it as U1's mixed placement.
+- **Data:** `results/contention*.csv`, `harness/contention.py`. **Details:** [IDEAS.md](IDEAS.md) U3.
+
 ## Open questions and next experiments
 
 | Question | How to test | Status |
@@ -81,7 +86,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
 | How much does SMLAD on dw1 (and conv1) save? | v1 back end with bound-checked int16 path | Next |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | Three-plus builds of fc1, same harness | Next |
 | Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Train or borrow a model with many input channels | Not started |
-| Is the second core's flash penalty about cache thrashing or bandwidth? | Pin fc1 weights in SRAM while code stays in flash | Not started |
+| Is the second core's flash penalty about cache thrashing or bandwidth? | Contention measured (F12): moderate on convs, strong on fc1. Next: fc1 weights in SRAM vs conv code in SRAM vs both (U1) | Measured; placement test next |
 
 ## Caveats
 
@@ -96,6 +101,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms). Accuracy: 99.47% 
 |---|---|
 | Timed runs (one row per build) | `results/phase0.csv`, `results/phase1.csv` (same columns; see [results/README.md](../results/README.md)) |
 | Stage cycles | `results/profile.csv`, `results/profile_stages.csv`, `results/profile_stages_dual.csv` |
+| Core-contention test (F12) | `results/contention.csv`, `results/contention_stages.csv`, `results/contention_stages_dual.csv`; `harness/contention.py` |
 | Dated narrative | [LOG.md](LOG.md) |
 | Baseline design | [cmsis-nn-baseline.md](cmsis-nn-baseline.md) |
 | Integer semantics and licence | [bitnetmcu-integer-inference.md](bitnetmcu-integer-inference.md) |
