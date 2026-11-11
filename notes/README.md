@@ -5,6 +5,8 @@ Working notes kept for future reference: what was looked into, what was found, a
 | Note | What's in it |
 |---|---|
 | [FINDINGS.md](FINDINGS.md) | **Start here for analysis:** all conclusions so far (F1–F11) with evidence, headline numbers, open questions, caveats |
+| [EXPLAINER.md](EXPLAINER.md) | **New to the project?** Plain-language guide from zero: models, ternary, the hardware, what each piece does, results so far, glossary. Keep it updated |
+| [IDEAS.md](IDEAS.md) | Ideas and questions to test (U1–U4 so far: cache placement, cheaper weight unpacking, compute/load core split, weights as code), each with an assessment and a test plan |
 | [LOG.md](LOG.md) | Dated lab log: what was done each session, with key numbers |
 | [bitnetmcu-integer-inference.md](bitnetmcu-integer-inference.md) | How BitNetMCU's integer inference works (packing formats, requantization), how our C reference and golden model relate to it, licence |
 | [pico-toolchain.md](pico-toolchain.md) | Building, flashing and talking to the Pico 2 from this PC: paths, commands, quirks |
