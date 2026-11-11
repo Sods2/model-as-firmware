@@ -2,6 +2,26 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 12 Nov 2026 (later): idea A three-way test; join wait fixed
+
+- `--conv code`: conv weights as immediates, one SMLAD function per channel (240 functions), for the all-code build. Bit-exact on the PC and the board.
+- All-code (10k images): 1.95 ms two cores SRAM, 3.58 ms one core SRAM, but 6.70 / 6.29 ms from flash (the conv code thrashes the XIP cache).
+- Surprise: in the all-code build the join wait was 29 cycles instead of 24k. The cause was core 1's inlined copy of the SMLAD kernel: worse code, with spills in dw1. Fix: `noinline` kernel in two-core builds (F19). Hybrid two cores: 2.15 → **1.99 ms (7.28x CMSIS-NN)**; flash 2.35 → 2.27 ms; all-data two cores 3.05 → 2.91 ms. One-core builds stay inline (noinline was 1% slower there).
+- Idea A verdict (F20): **keep the hybrid**.
+  - SRAM: all-data / hybrid / all-code = 2.91 / 1.99 / 1.95 ms (two cores) and 5.23 / 3.56 / 3.58 ms (one core).
+  - Flash: 4.32 / 2.27 / 6.70 ms and 5.97 / 3.59 / 6.29 ms.
+  - Flash used: 52 / 156 / 197 KB.
+  - Rule: weights with no reuse → code; weights with reuse → data.
+
+## 12 Nov 2026: fc2/fc3 as code
+
+- `compile.py --int4 {packed,code,dense}`. Code groups each row by weight magnitude (one add/sub per weight, one multiply per magnitude). All 12 variants are bit-exact on the PC.
+- fc2 (one core, SRAM): 59.0k → 17.4k cycles as code (22.6k dense), against CMSIS-NN's 16.6k: parity. fc3: 7.1k → 2.9k (CMSIS-NN 2.1k).
+- Whole model, 10k images, bit-exact:
+  - **2.15 ms** two cores SRAM (6.77x); 2.35 ms two cores flash;
+  - **3.56 ms one core SRAM = 4.08x CMSIS-NN like-for-like** (was 3.75x); 3.59 ms one core flash;
+  - z70 2.09 ms, z90 2.03 ms. FINDINGS F18.
+
 ## 11 Nov 2026 (late night, 2): fairness check, Gate 1
 
 - Audited the CMSIS-NN baseline. DSP is on, dw1/dw2 use the dedicated 3×3 depthwise kernel, and conv1 uses im2col (no faster path exists for one input channel). Nothing to fix.

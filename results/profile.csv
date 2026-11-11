@@ -38,3 +38,17 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-11 20:50,mafc_v1_dual_simd_code_ram_prof,tern80z90,pico,200,100.0,100.0,100.0,2.216,332445,332396,332617,150,59.93,71.2,,,fc1 format (code in SRAM)
 2026-11-11 20:51,mafc_v1_dual_simd_ram_prof,tern80z70,pico,200,100.0,100.0,100.0,3.039,455895,455842,456141,150,51.79,63.07,,,fc1 format (code in SRAM)
 2026-11-11 20:51,mafc_v1_dual_simd_ram_prof,tern80z90,pico,200,100.0,100.0,100.0,3.02,452930,452831,452954,150,51.79,63.07,,,fc1 format (code in SRAM)
+2026-11-11 22:05,mafc_v0_simd_code_i4code_ram_prof,tern80,pico,200,100.0,100.0,100.0,3.606,540881,540796,541308,150,160.95,164.15,,,fc2/fc3 format
+2026-11-11 22:06,mafc_v0_simd_code_i4dense_ram_prof,tern80,pico,200,100.0,100.0,100.0,3.623,543421,543327,543837,150,136.09,139.61,,,fc2/fc3 format
+2026-11-11 22:06,mafc_v1_dual_simd_code_i4code_ram_prof,tern80,pico,200,100.0,100.0,100.0,2.152,322726,322531,322824,150,156.51,161.25,,,fc2/fc3 format
+2026-11-11 22:07,mafc_v1_dual_simd_code_i4dense_ram_prof,tern80,pico,200,100.0,100.0,100.0,2.194,329065,329002,329406,150,132.09,137.14,,,fc2/fc3 format
+2026-11-11 22:07,mafc_v0_simd_code_i4code_prof,tern80,pico,200,100.0,100.0,100.0,3.604,540561,538562,614339,150,161.09,133.57,,,fc2/fc3 format
+2026-11-11 22:08,mafc_v0_simd_code_i4dense_prof,tern80,pico,200,100.0,100.0,100.0,4.033,604943,600982,670336,150,136.21,101.79,,,fc2/fc3 format
+2026-11-11 22:09,mafc_v1_dual_simd_code_i4code_prof,tern80,pico,200,100.0,100.0,100.0,2.401,360115,357800,453852,150,156.66,129.19,,,fc2/fc3 format
+2026-11-11 22:09,mafc_v1_dual_simd_code_i4dense_prof,tern80,pico,200,100.0,100.0,100.0,2.943,441499,437080,557649,150,132.21,97.76,,,fc2/fc3 format
+2026-11-11 22:38,mafc_v0_simd_code_i4code_cvcode_ram_prof,tern80,pico,200,100.0,100.0,100.0,3.606,540908,540871,541380,150,202.46,205.66,,,all code (idea A): conv + linear as code
+2026-11-11 22:39,mafc_v1_dual_simd_code_i4code_cvcode_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.962,294366,294194,294900,150,197.5,202.24,,,all code (idea A): conv + linear as code
+2026-11-11 22:39,mafc_v0_simd_code_i4code_cvcode_prof,tern80,pico,200,100.0,100.0,100.0,6.348,952177,948235,957754,150,202.59,133.57,,,all code (idea A): conv + linear as code
+2026-11-11 22:40,mafc_v1_dual_simd_code_i4code_cvcode_prof,tern80,pico,200,100.0,100.0,100.0,5.374,806164,793598,926252,150,197.65,129.19,,,all code (idea A): conv + linear as code
+2026-11-11 22:53,mafc_v1_dual_simd_code_i4code_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.997,299499,299402,300016,150,156.55,161.29,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 22:53,mafc_v1_dual_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,2.913,436889,436531,437874,150,51.87,56.61,,,noinline SMLAD conv kernel (one copy for both cores)

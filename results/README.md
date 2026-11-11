@@ -119,6 +119,36 @@ Build names carry the format (`_sparse`, `_code`, `_dense`; no suffix = base3). 
 
 All bit-exact on all 10,000 images. Accuracy: 99.47% for tern80 and z70, 99.51% for z90.
 
+### fc2/fc3 as code (`notes` = `fc2/fc3 format` / `fc1 + fc2/fc3 as code, in SRAM`)
+
+The build names end in `_i4code` / `_i4dense`. Profile rows compare the int4 formats (FINDINGS F18); the code builds were then measured on 10k images.
+
+| Build | Before (fc1 as code) | + fc2/fc3 as code | Change | vs CMSIS-NN (same memory) | Flash | RAM* |
+|---|---|---|---|---|---|---|
+| mafc_v0_simd_code_i4code (flash, linear in SRAM) | 4.11 ms | 3.59 ms | −12.7% | 5.22x | 160.9 KB | 133.6 KB |
+| mafc_v0_simd_code_i4code (SRAM) | 3.87 ms | 3.56 ms | −8.0% | 4.08x | 160.8 KB | 164.0 KB |
+| mafc_v1_dual_simd_code_i4code (flash, linear in SRAM) | 2.89 ms | 2.35 ms | −18.6% | 7.95x | 156.5 KB | 129.2 KB |
+| **mafc_v1_dual_simd_code_i4code (SRAM)** | 2.32 ms | **2.15 ms** | −7.6% | **6.77x** | 156.3 KB | 161.1 KB |
+| same, tern80z70 (SRAM) | 2.26 ms | 2.09 ms | −7.9% | 6.96x | 114.8 KB | 119.5 KB |
+| same, tern80z90 (SRAM) | 2.21 ms | 2.03 ms | −7.9% | 7.14x | 86.9 KB | 91.6 KB |
+
+All bit-exact on all 10,000 images.
+
+### Shared SMLAD kernel (`notes` = `noinline SMLAD conv kernel ...`) and the all-code build (`all code (idea A) ...`)
+
+| Build | Before | After | Note |
+|---|---|---|---|
+| **mafc_v1_dual_simd_code_i4code (SRAM)** | 2.15 ms | **1.99 ms** | 7.28x CMSIS-NN; join wait 24k → 24 cycles |
+| mafc_v1_dual_simd_code_i4code (flash) | 2.35 ms | 2.27 ms | 8.23x vs CMSIS-NN from flash |
+| mafc_v1_dual_simd (SRAM) | 3.05 ms | 2.91 ms | all-data |
+| mafc_v1_dual_simd (flash) | 4.38 ms | 4.32 ms | all-data |
+| mafc_v0_simd_code_i4code (SRAM / flash) | 3.56 / 3.59 ms | 3.59 / 3.64 ms | noinline is 1% slower on one core, so one-core builds keep the inline kernel (the earlier rows stand) |
+| mafc_v0_simd (SRAM / flash) | 5.23 / 5.97 ms | 5.25 / 6.01 ms | same |
+| mafc_v1_dual_simd_code_i4code_cvcode (SRAM / flash) | | 1.95 / 6.70 ms | all-code: conv weights as code too |
+| mafc_v0_simd_code_i4code_cvcode (SRAM / flash) | | 3.58 / 6.29 ms | all-code |
+
+All tern80, bit-exact on all 10,000 images. Idea A verdict and table: FINDINGS F20.
+
 ### Wide-conv fairness benchmark (`bench_conv.csv`)
 
 One 3×3 conv, 10×10×32 → 8×8×32, ternary weights. CMSIS-NN `arm_convolve_wrapper_s8` against mafc's weights-as-code kernel; same requantization, and every output is checked bit-exact on the board (`bit_exact` column). One row per kernel and zero fraction, with min and mean cycles over 20 runs. Produced by `harness/bench_conv.py run` (see FINDINGS F17).

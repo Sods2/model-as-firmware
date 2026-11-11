@@ -598,11 +598,13 @@ static inline void norm0(const int32_t *restrict in, int8_t *restrict out) {
 }
 
 // fc1: linear 320 -> 96, ternary weights compiled into code (idea A): 3071 nonzeros, one load and one add/sub each
+#ifndef MAFC_IN_SRAM
 #if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
 #include "pico.h"
 #define MAFC_IN_SRAM(f) __not_in_flash_func(f)   // section .time_critical.<f>, copied to SRAM at boot
 #else
 #define MAFC_IN_SRAM(f) f
+#endif
 #endif
 __attribute__((noinline)) static void MAFC_IN_SRAM(fc1)(const int8_t *restrict in, int32_t *restrict out) {
     out[0] =

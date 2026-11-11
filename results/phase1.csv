@@ -29,3 +29,21 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-11 21:00,mafc_v0_simd_code,tern80,pico,10000,99.47,100.0,99.98,4.107,615996,612313,689275,150,132.61,101.47,,,"fc1 as code (idea A), in SRAM"
 2026-11-11 21:01,mafc_v1_dual_simd_code_ram,tern80z70,pico,10000,99.47,100.0,99.97,2.264,339604,339494,340064,150,87.71,92.44,,,"fc1 as code (idea A), in SRAM"
 2026-11-11 21:03,mafc_v1_dual_simd_code_ram,tern80z90,pico,10000,99.51,100.0,99.98,2.209,331374,331253,331488,150,59.75,64.49,,,"fc1 as code (idea A), in SRAM"
+2026-11-11 22:11,mafc_v1_dual_simd_code_i4code_ram,tern80,pico,10000,99.47,100.0,99.98,2.146,321891,321757,322090,150,156.32,161.05,,,"fc1 + fc2/fc3 as code, in SRAM"
+2026-11-11 22:13,mafc_v1_dual_simd_code_i4code,tern80,pico,10000,99.47,100.0,99.98,2.352,352820,350862,428561,150,156.45,129.19,,,"fc1 + fc2/fc3 as code, in SRAM"
+2026-11-11 22:15,mafc_v0_simd_code_i4code_ram,tern80,pico,10000,99.47,100.0,99.98,3.559,533838,533745,534271,150,160.78,163.98,,,"fc1 + fc2/fc3 as code, in SRAM"
+2026-11-11 22:17,mafc_v0_simd_code_i4code,tern80,pico,10000,99.47,100.0,99.98,3.585,537818,535514,617098,150,160.91,133.57,,,"fc1 + fc2/fc3 as code, in SRAM"
+2026-11-11 22:19,mafc_v1_dual_simd_code_i4code_ram,tern80z70,pico,10000,99.47,100.0,99.97,2.085,312679,312534,312880,150,114.77,119.5,,,"fc1 + fc2/fc3 as code, in SRAM"
+2026-11-11 22:20,mafc_v1_dual_simd_code_i4code_ram,tern80z90,pico,10000,99.51,100.0,99.98,2.034,305043,304911,305129,150,86.87,91.61,,,"fc1 + fc2/fc3 as code, in SRAM"
+2026-11-11 22:42,mafc_v0_simd_code_i4code_cvcode_ram,tern80,pico,10000,99.47,100.0,99.98,3.581,537178,537087,537611,150,202.3,205.5,,,all code (idea A): conv + linear as code
+2026-11-11 22:44,mafc_v1_dual_simd_code_i4code_cvcode_ram,tern80,pico,10000,99.47,100.0,99.98,1.948,292125,291732,292690,150,197.33,202.07,,,all code (idea A): conv + linear as code
+2026-11-11 22:47,mafc_v0_simd_code_i4code_cvcode,tern80,pico,10000,99.47,100.0,99.98,6.287,943012,938228,951129,150,202.43,133.57,,,all code (idea A): conv + linear as code
+2026-11-11 22:50,mafc_v1_dual_simd_code_i4code_cvcode,tern80,pico,10000,99.47,100.0,99.98,6.699,1004911,782429,1051436,150,197.47,129.19,,,all code (idea A): conv + linear as code
+2026-11-11 22:55,mafc_v1_dual_simd_code_i4code_ram,tern80,pico,10000,99.47,100.0,99.98,1.994,299047,297318,299223,150,156.36,161.1,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 22:57,mafc_v1_dual_simd_code_i4code,tern80,pico,10000,99.47,100.0,99.98,2.272,340873,338360,427787,150,156.5,129.19,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 22:59,mafc_v0_simd_code_i4code_ram,tern80,pico,10000,99.47,100.0,99.98,3.588,538237,538144,538669,150,160.8,164.0,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 23:01,mafc_v0_simd_code_i4code,tern80,pico,10000,99.47,100.0,99.98,3.635,545281,542420,634258,150,160.93,133.57,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 23:02,mafc_v1_dual_simd_ram,tern80,pico,10000,99.47,100.0,99.98,2.911,436667,435922,437918,150,51.64,56.38,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 23:04,mafc_v1_dual_simd,tern80,pico,10000,99.47,100.0,99.98,4.321,648139,640362,753420,150,51.76,13.59,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 23:06,mafc_v0_simd_ram,tern80,pico,10000,99.47,100.0,99.98,5.251,787588,787506,788033,150,49.51,52.71,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-11 23:09,mafc_v0_simd,tern80,pico,10000,99.47,100.0,99.98,6.008,901208,894794,990811,150,49.62,12.05,,,noinline SMLAD conv kernel (one copy for both cores)

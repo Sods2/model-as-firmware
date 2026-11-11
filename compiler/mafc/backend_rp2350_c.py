@@ -132,7 +132,7 @@ def pack_smlad_kernel(k):
     return np.concatenate([a, b], axis=1)
 
 
-def emit_conv_ch_smlad(node, out_ctype):
+def emit_conv_ch_smlad(node, out_ctype, ch=None, kwords=None, shared=False):
     """One channel of a 3x3 conv on an int16 plane, two outputs per step with SMLAD.
     For outputs x and x+1 of one kernel row r (inputs i0..i3 = in[x..x+3], words p = (i0, i1), q = (i2, i3),
     kernel words A = (k0, k1), B = (k1, k2)):
@@ -143,7 +143,9 @@ def emit_conv_ch_smlad(node, out_ctype):
     ReLU + shift is one USAT: s < 0 gives 0, and the upper clamp is never reached (output range proven).
     An int16 output pair is stored as one word: both values are in [0, 2^15), so v0 | v1 << 16 is exactly the
     two int16s side by side (little-endian).
-    The x loop is kept rolled (`#pragma GCC unroll 1`): unrolled, gcc hoists the loads and spills to the stack."""
+    The x loop is kept rolled (`#pragma GCC unroll 1`): unrolled, gcc hoists the loads and spills to the stack.
+    ch/kwords: the weights-as-code variant (--conv code): one function per channel, named <node>_ch<ch>,
+    with its 6 kernel words as immediates instead of loaded from <node>_kp."""
     n = node.in_shape[1]
     m = n - 2
     sh = node.attrs['shift']
@@ -170,9 +172,22 @@ def emit_conv_ch_smlad(node, out_ctype):
     else:
         store = (f"            o[x] = ({out_ctype}){v0};\n"
                  f"            o[x + 1] = ({out_ctype}){v1};")
-    return f'''// {node.name}: conv3x3 ({node.attrs['mode']}), one channel, int16 {n}x{n} -> {m}x{m}, ReLU, >> {sh}; SMLAD, 2 outputs per step
-static inline void {node.name}_ch(const int16_t *restrict in, const uint32_t *restrict kp, {out_ctype} *restrict out) {{
-    const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];
+    if ch is None:
+        # shared (two-core builds): noinline, one copy for both cores. Inlined, gcc compiled core 1's copy (inside
+        # core1_main) with spills (dw1 loop 30 instructions vs 24), and core 0 waited ~24k cycles at the join (F19).
+        # One-core builds keep it inline (the call costs ~1%).
+        qual = '__attribute__((noinline)) static void' if shared else 'static inline void'
+        head = (f'{qual} {node.name}_ch(const int16_t *restrict in, const uint32_t *restrict kp, '
+                f'{out_ctype} *restrict out) {{\n'
+                '    const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];')
+        title = f'// {node.name}: conv3x3 ({node.attrs["mode"]}), one channel'
+    else:
+        kw = [f'0x{int(v):08X}u' for v in kwords]
+        head = (f'static void {node.name}_ch{ch}(const int16_t *restrict in, {out_ctype} *restrict out) {{\n'
+                f'    const uint32_t a0 = {kw[0]}, a1 = {kw[1]}, a2 = {kw[2]}, b0 = {kw[3]}, b1 = {kw[4]}, b2 = {kw[5]};')
+        title = f'// {node.name}: conv3x3 ({node.attrs["mode"]}), channel {ch}, weights as code'
+    return f'''{title}, int16 {n}x{n} -> {m}x{m}, ReLU, >> {sh}; SMLAD, 2 outputs per step
+{head}
     for (int y = 0; y < {m}; y++) {{
         const int16_t *row = in + y * {n};
         {out_ctype} *o = out + y * {m};
@@ -346,16 +361,20 @@ PAR_MIN_MACS = 4096   # linear layers smaller than this stay on core 0 (the hand
 
 
 TERNARY_FORMATS = ('base3', 'sparse', 'code', 'dense')
+INT4_FORMATS = ('packed', 'code', 'dense')
 
 
-def emit_ternary(node, fmt, rows):
-    """A ternary linear layer in one of the alternative formats (base3 is emit_linear). Returns
+def emit_linear_fmt(node, fmt, rows):
+    """A ternary or int4sym linear layer in one of the alternative formats (base3 / packed are emit_linear). Returns
     (weights C text, function C text, C statement to run before the call or None, extra globals C text).
     Every function takes (in, out, o0, o1) when rows is True, else (in, out).
       sparse: per row, the input indices of the +1 weights then the -1 weights (uint16), summed with a loop.
-      code:   idea A, the weights compiled into the instructions: one straight-line sum per row.
-      dense:  int8 trits, 4 per word, unpacked with SXTB16 and multiplied with SMLAD against an int16 copy
-              of the input (widened once, before the call)."""
+      code:   idea A, the weights compiled into the instructions: one straight-line sum per row. For int4sym,
+              the inputs are summed per weight magnitude first and each group is multiplied once:
+              3 * (in[2] - in[9] ...) + 5 * (...) + ...  (one add/sub per weight, at most 8 multiplies per row).
+      dense:  the weights as int8, 4 per word, unpacked with SXTB16 and multiplied with SMLAD against an int16
+              copy of the input (widened once, before the call). Ternary or int4sym.
+    sparse is ternary only."""
     w = node.weights
     n_out, n_in = w.shape
     nm = node.name
@@ -363,6 +382,8 @@ def emit_ternary(node, fmt, rows):
           '(const int8_t *restrict in, int32_t *restrict out)'
     lo, hi = ('o0', 'o1') if rows else ('0', str(n_out))
     nnz = int(np.count_nonzero(w))
+    q = node.attrs['quant']
+    assert q in ('ternary', 'int4sym') and (fmt != 'sparse' or q == 'ternary')
     if fmt == 'sparse':
         idx, start, mid = [], [], []
         for o in range(n_out):
@@ -391,8 +412,17 @@ static inline void {nm}{sig} {{
     if fmt == 'code':
         lines = []
         for o in range(n_out):
-            terms = [f'+ in[{i}]' for i in np.nonzero(w[o] == 1)[0]] + [f'- in[{i}]' for i in np.nonzero(w[o] == -1)[0]]
-            expr = ' '.join(terms).lstrip('+ ') if terms else '0'
+            groups = []
+            for mag in sorted({abs(int(v)) for v in w[o] if v}):
+                terms = [f'+ in[{i}]' for i in np.nonzero(w[o] == mag)[0]] + \
+                        [f'- in[{i}]' for i in np.nonzero(w[o] == -mag)[0]]
+                groups.append((mag, ' '.join(terms).lstrip('+ ')))
+            if not groups:
+                expr = '0'
+            elif len(groups) == 1 and groups[0][0] == 1:
+                expr = groups[0][1]                      # ternary: a plain sum
+            else:
+                expr = ' + '.join(f'({g})' if mag == 1 else f'{mag} * ({g})' for mag, g in groups)
             text, line = [], ''          # wrap at about 110 columns, between tokens
             for tok in expr.split(' '):
                 if len(line) + len(tok) > 110:
@@ -405,25 +435,29 @@ static inline void {nm}{sig} {{
             lines.append(f'    {guard}out[{o}] =\n            {body};')
         # The function always lives in SRAM (copied at boot, also in flash builds): run from flash, its ~90 KB of
         # straight-line code streams through the 16 KB XIP cache and is 12x slower than from SRAM (F16).
-        fn = f'''// {nm}: linear {n_in} -> {n_out}, ternary weights compiled into code (idea A): {nnz} nonzeros, one load and one add/sub each
+        what = 'one load and one add/sub each' if q == 'ternary' else \
+            'summed per weight magnitude, then one multiply per magnitude'
+        fn = f'''// {nm}: linear {n_in} -> {n_out}, {q} weights compiled into code (idea A): {nnz} nonzeros, {what}
+#ifndef MAFC_IN_SRAM
 #if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
 #include "pico.h"
 #define MAFC_IN_SRAM(f) __not_in_flash_func(f)   // section .time_critical.<f>, copied to SRAM at boot
 #else
 #define MAFC_IN_SRAM(f) f
 #endif
+#endif
 __attribute__((noinline)) static void MAFC_IN_SRAM({nm}){sig} {{
 ''' + '\n'.join(lines) + '\n}\n'
         return '', fn, None, ''
     if fmt == 'dense':
-        assert n_in % 4 == 0, 'dense ternary needs n_in % 4 == 0'
+        assert n_in % 4 == 0, 'dense format needs n_in % 4 == 0'
         b = w.astype(np.int64).reshape(n_out, n_in // 4, 4) & 0xFF
         # bytes [w0, w2, w1, w3]: SXTB16(word) = (w0, w1), SXTB16(word ror 8) = (w2, w3)
         words = (b[:, :, 0] | (b[:, :, 2] << 8) | (b[:, :, 1] << 16) | (b[:, :, 3] << 24)).reshape(-1)
         k = n_in // 4
         data = c_array('uint32_t', f'{nm}_w', words, '0x{:08X}', 8)
         glob = f'static int16_t {nm}_a16[{n_in}] __attribute__((aligned(4)));   // {nm} input widened to int16\n'
-        fn = f'''// {nm}: linear {n_in} -> {n_out}, ternary as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input
+        fn = f'''// {nm}: linear {n_in} -> {n_out}, {q} as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input
 static inline void {nm}_widen(const int8_t *restrict in) {{
     for (int i = 0; i < {n_in}; i++) {nm}_a16[i] = in[i];
 }}
@@ -448,7 +482,10 @@ static inline void {nm}{sig} {{
     raise ValueError(fmt)
 
 
-def generate(graph, source='', cores=1, simd=False, ternary='base3'):
+CONV_FORMATS = ('data', 'code')
+
+
+def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data'):
     """cores=2: the channel-fused conv segment and the big linear layers are split across both M33 cores.
     Core 1 runs a job loop fed by the SIO FIFO; on the PC build the core-1 jobs simply run inline first."""
     assert cores in (1, 2)
@@ -501,23 +538,34 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3'):
     for nd, it, ot, kern in plan:
         if nd.op == 'conv3x3':
             if kern == 'smlad':
-                weights.append(c_array('uint32_t', f'{nd.name}_kp', pack_smlad_kernel(nd.weights), '0x{:08X}', 6))
-                funcs.append(emit_conv_ch_smlad(nd, ot))
+                kp = pack_smlad_kernel(nd.weights)
+                if conv == 'code':
+                    # weights as code: one specialised function per channel, called through a table
+                    for c in range(kp.shape[0]):
+                        funcs.append(emit_conv_ch_smlad(nd, ot, ch=c, kwords=kp[c]))
+                    funcs.append(f'static void (*const {nd.name}_tab[{kp.shape[0]}])(const int16_t *restrict, {ot} *restrict) = {{\n    ' +
+                                 ', '.join(f'{nd.name}_ch{c}' for c in range(kp.shape[0])) + '};\n')
+                else:
+                    weights.append(c_array('uint32_t', f'{nd.name}_kp', kp, '0x{:08X}', 6))
+                    funcs.append(emit_conv_ch_smlad(nd, ot, shared=cores == 2))
             else:
                 weights.append(c_array('int8_t', f'{nd.name}_w', nd.weights.reshape(-1)))
                 funcs.append(emit_conv_ch(nd, it, ot) if simd else
                              emit_conv_ch(nd, 'int8_t' if nd.attrs['mode'] == 'broadcast' else 'int32_t'))
         else:
             funcs.append(emit_pool_ch(nd, it, ot) if simd else emit_pool_ch(nd))
-    assert ternary in TERNARY_FORMATS
-    assert ternary != 'dense' or simd, 'the dense ternary format uses SXTB16/SMLAD: needs --simd'
+    assert ternary in TERNARY_FORMATS and int4 in INT4_FORMATS and conv in CONV_FORMATS
+    assert conv == 'data' or simd, '--conv code specialises the SMLAD conv kernels: needs --simd'
+    assert (ternary != 'dense' and int4 != 'dense') or simd, 'the dense formats use SXTB16/SMLAD: need --simd'
     pre_call, extra_globals = {}, ''
     for nd in rest:
         if nd.op == 'relu_norm':
             funcs.append(emit_relu_norm(nd))
         elif nd.op == 'linear':
-            if nd.attrs['quant'] == 'ternary' and ternary != 'base3':
-                d, f, pre, glob = emit_ternary(nd, ternary, rows=nd.name in par_linear)
+            fmt = {'ternary': ternary if ternary != 'base3' else None,
+                   'int4sym': int4 if int4 != 'packed' else None}.get(nd.attrs['quant'])
+            if fmt:
+                d, f, pre, glob = emit_linear_fmt(nd, fmt, rows=nd.name in par_linear)
                 if pre:
                     pre_call[nd.name] = pre
                 extra_globals += glob
@@ -541,7 +589,10 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3'):
                 dst = next(b for b in pools[ot] if b != cur)
                 used_dst.add(dst)
             if nd.op == 'conv3x3' and kern == 'smlad':
-                out.append(f'{indent}    {nd.name}_ch({cur}, {nd.name}_kp + 6 * c, {dst});')
+                if conv == 'code':
+                    out.append(f'{indent}    {nd.name}_tab[c]({cur}, {dst});')
+                else:
+                    out.append(f'{indent}    {nd.name}_ch({cur}, {nd.name}_kp + 6 * c, {dst});')
             elif nd.op == 'conv3x3':
                 out.append(f'{indent}    {nd.name}_ch({cur}, {nd.name}_w + 9 * c, {dst});')
             else:
@@ -637,10 +688,10 @@ static inline void join_job(void) {{}}
     ]
 
     variant = ('v0 (one core' if cores == 1 else 'v1 (two cores') + (', SMLAD on int16 planes' if simd else '') + \
-              (f', ternary as {ternary}' if ternary != 'base3' else '')
+              (f', ternary as {ternary}' if ternary != 'base3' else '') + (f', int4 as {int4}' if int4 != 'packed' else '') + (', conv weights as code' if conv == 'code' else '')
     names = ', '.join(f'"{n}"' for n in stage_names)
     regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '') + (' --simd' if simd else '') + \
-            (f' --ternary {ternary}' if ternary != 'base3' else '')
+            (f' --ternary {ternary}' if ternary != 'base3' else '') + (f' --int4 {int4}' if int4 != 'packed' else '') + (' --conv code' if conv == 'code' else '')
     desc = '\n'.join('//   ' + l for l in graph.describe().splitlines())
     head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c {variant}, all weights as packed data).
 // Source: {source}
@@ -685,11 +736,12 @@ static int8_t act[{tail_max}];
             '\n'.join(body) + '\n}\n')
 
 
-def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3'):
+def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data'):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     c_path = out_dir / (f'mafc_{graph.name}' + ('_dual' if cores == 2 else '') + ('_simd' if simd else '') +
-                        (f'_{ternary}' if ternary != 'base3' else '') + '.c')
-    c_path.write_text(generate(graph, source, cores, simd, ternary), encoding='utf-8', newline='\n')
+                        (f'_{ternary}' if ternary != 'base3' else '') + (f'_i4{int4}' if int4 != 'packed' else '') +
+                        ('_cvcode' if conv == 'code' else '') + '.c')
+    c_path.write_text(generate(graph, source, cores, simd, ternary, int4, conv), encoding='utf-8', newline='\n')
     (out_dir / f'mafc_{graph.name}.ir.json').write_text(graph.to_json(), encoding='utf-8', newline='\n')
     return c_path

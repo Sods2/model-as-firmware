@@ -22,8 +22,8 @@ train/export/<model>.h ──front end──► IR (integer ops + integer weight
 ```bash
 train/.venv/Scripts/python.exe compiler/compile.py --model tern80     # -> firmware/rp2350/mafc/gen/mafc_tern80.c (+ .ir.json)
 harness/measure.sh final results/phase1.csv mafc:tern80:flash mafc:tern80:ram
-train/.venv/Scripts/python.exe compiler/compile.py --model tern80 --cores 2 --simd --ternary code   # current best
-harness/measure.sh final results/phase1.csv mafc2_s:tern80:ram:code
+train/.venv/Scripts/python.exe compiler/compile.py --model tern80 --cores 2 --simd --ternary code --int4 code   # current best
+harness/measure.sh final results/phase1.csv mafc2_s:tern80:ram:code:code
 ```
 
 The generated C is committed, so building the firmware doesn't need Python. Regenerate it after changing the compiler or a model.
@@ -71,8 +71,24 @@ The plain kernels write the conv ReLU clamp-then-shift (`relu_shift()`): `(s > 0
 
 Numbers: FINDINGS F16.
 
+## int4 layer formats (`--int4`)
+
+`compile.py --int4 {packed,code,dense}` sets the format of int4sym layers (fc2, fc3). The file suffix is `_i4<format>`; build with `-DINT4=<format>`, or give it as the 5th field in `measure.sh` (`mafc2_s:tern80:ram:code:code`).
+
+- **packed** (default): 8 weights per uint32 and a decode loop.
+- **code:** per row, sums grouped by weight magnitude, one multiply per group; placed in SRAM. About 3.4x faster than packed, and level with CMSIS-NN.
+- **dense:** int8 weights with `SXTB16`/`SMLAD` (needs `--simd`).
+
+Numbers: FINDINGS F18.
+
+## Conv weights as code (`--conv code`)
+
+`--conv code` (with `--simd`) writes one SMLAD function per conv channel with the kernel words as immediates, called through a table. File suffix `_cvcode`, CMake `-DCONV=code`, `measure.sh` 6th field. It exists for the idea A comparison and is not recommended. It is no faster from SRAM and 2–3x slower from flash, because conv weights are reused across a whole plane anyway (FINDINGS F20).
+
+In two-core builds the SMLAD conv kernel is `noinline`, so both cores run one copy. An inlined copy in `core1_main` was compiled worse and made core 0 wait about 7% (FINDINGS F19).
+
 ## Limits of v0
 
 - Front end: the BitNetMCU CNNMNIST header layout only. A QONNX or `.pth` front end comes later.
 - Back end: 1x16x16 int8 input, a per-channel conv prefix, and a `linear -> 10` + `argmax` end. These match the harness protocol.
-- SIMD covers the convs only. Weights as code (idea A) only for ternary layers so far; fc2/fc3 (int4) are still packed data. See `notes/compiler.md`.
+- SIMD covers the convs only. Weights as code (idea A) covers the linear layers (ternary and int4); conv weights are still data. See `notes/compiler.md`.

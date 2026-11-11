@@ -1409,7 +1409,7 @@ static const uint32_t fc3_w[80] = {
 
 // ---- layers ----
 // conv1: conv3x3 (broadcast), one channel, int16 16x16 -> 14x14, ReLU, >> 4; SMLAD, 2 outputs per step
-static inline void conv1_ch(const int16_t *restrict in, const uint32_t *restrict kp, int16_t *restrict out) {
+__attribute__((noinline)) static void conv1_ch(const int16_t *restrict in, const uint32_t *restrict kp, int16_t *restrict out) {
     const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];
     for (int y = 0; y < 14; y++) {
         const int16_t *row = in + y * 16;
@@ -1451,7 +1451,7 @@ static inline void conv1_ch(const int16_t *restrict in, const uint32_t *restrict
 }
 
 // dw1: conv3x3 (depthwise), one channel, int16 14x14 -> 12x12, ReLU, >> 4; SMLAD, 2 outputs per step
-static inline void dw1_ch(const int16_t *restrict in, const uint32_t *restrict kp, int16_t *restrict out) {
+__attribute__((noinline)) static void dw1_ch(const int16_t *restrict in, const uint32_t *restrict kp, int16_t *restrict out) {
     const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];
     for (int y = 0; y < 12; y++) {
         const int16_t *row = in + y * 14;
@@ -1505,7 +1505,7 @@ static inline void pool1_ch(const int16_t *restrict in, int16_t *restrict out) {
 }
 
 // dw2: conv3x3 (depthwise), one channel, int16 6x6 -> 4x4, ReLU, >> 4; SMLAD, 2 outputs per step
-static inline void dw2_ch(const int16_t *restrict in, const uint32_t *restrict kp, int32_t *restrict out) {
+__attribute__((noinline)) static void dw2_ch(const int16_t *restrict in, const uint32_t *restrict kp, int32_t *restrict out) {
     const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];
     for (int y = 0; y < 4; y++) {
         const int16_t *row = in + y * 6;

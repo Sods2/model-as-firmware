@@ -26,6 +26,12 @@ def main():
     ap.add_argument('--ternary', default='base3', choices=backend_rp2350_c.TERNARY_FORMATS,
                     help='format of ternary linear layers: base3 (10 trits/uint16, decode loop), sparse (index lists), '
                          'code (weights compiled into instructions, idea A), dense (int8 + SXTB16/SMLAD, needs --simd)')
+    ap.add_argument('--int4', default='packed', choices=backend_rp2350_c.INT4_FORMATS,
+                    help='format of int4sym linear layers (fc2, fc3): packed (8 per uint32, decode loop), '
+                         'code (weights compiled into instructions), dense (int8 + SXTB16/SMLAD, needs --simd)')
+    ap.add_argument('--conv', default='data', choices=backend_rp2350_c.CONV_FORMATS,
+                    help='conv weights: data (packed words loaded per channel) or code (one specialised function '
+                         'per channel, weights as immediates; needs --simd)')
     ap.add_argument('--check', type=int, default=1000, help='test images to check IR vs golden (0 = skip)')
     args = ap.parse_args()
 
@@ -41,7 +47,7 @@ def main():
         print(f'IR interpreter == golden on {args.check} images: {ok}')
         if not ok:
             sys.exit(1)
-    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd, ternary=args.ternary)
+    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd, ternary=args.ternary, int4=args.int4, conv=args.conv)
     print(f'wrote {path.relative_to(ROOT)}')
 
 

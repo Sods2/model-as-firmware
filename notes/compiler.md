@@ -187,6 +187,31 @@ Two-core SRAM profile with fc1 as code: conv1 127k (36%), dw1 94k (27%), pool1 2
 - fc2 as code or SMLAD (int4, 6,144 weights).
 - pool1.
 
+### v1 step 6: int4 layers as code (`compile.py --int4`, 11 Nov 2026)
+
+`emit_linear_fmt()` (renamed from `emit_ternary`) now handles int4sym layers too:
+- **code:** per row, the terms are grouped by |weight| and each group is multiplied once, `3 * (in[2] - in[9] …) + 5 * (…)`. Ternary rows are a single group with no multiply, so the generated ternary code is unchanged (apart from an `#ifndef MAFC_IN_SRAM` guard).
+- **dense:** int8 weights with `SXTB16`/`SMLAD`, the same as the ternary dense format.
+
+Files get an `_i4<format>` suffix (`mafc_tern80_dual_simd_code_i4code.c`); CMake takes `-DINT4=`, and `measure.sh` takes a 5th field (`mafc2_s:tern80:ram:code:code`).
+
+fc2 (one core, SRAM): packed 59.0k → dense 22.6k → code **17.4k** cycles (CMSIS-NN int8: 16.6k). fc3: 7.1k → 3.3k → 2.9k (CMSIS-NN 2.1k). The code is about 13.4k instructions for fc2's 6,144 weights.
+
+Whole model: **2.15 ms** (two cores, SRAM), 2.35 ms (two cores, flash), 3.56 ms (one core, SRAM), 3.59 ms (one core, flash). FINDINGS F18.
+
+Two-core SRAM profile now: conv1 127k (39%), dw1 94k (29%), pool1 23k (7%), dw2 13k, join 24k (7%), fc1 28k (9%), fc2 10k, fc3 3k. What's left is almost all the conv stack and the core imbalance.
+
+### v1 step 7: shared kernel for two cores; all-code convs (`--conv code`) (12 Nov 2026)
+
+- **Shared kernel:** in two-core builds `emit_conv_ch_smlad(shared=True)` marks the kernel `noinline`.
+  - Inlined, core 1's copy inside `core1_main` was compiled worse: dw1 loop 30 instructions and 5 `[sp]`, against 24 and 0 on core 0. Core 0 waited about 24k cycles at the join.
+  - Now the join wait is 24 cycles: 2.15 → 1.99 ms (two cores, SRAM). One-core builds stay inline (noinline cost 1% there). FINDINGS F19.
+  - Check both `ref_infer` and `core1_main` with `asm_loops.py` in two-core builds.
+- **`--conv code`:**
+  - One function per conv channel with the 6 kernel words as immediates, plus a function table `<layer>_tab[c]`. File suffix `_cvcode`, CMake `-DCONV=code`, `measure.sh` 6th field.
+  - The result (F20): no gain from SRAM, 2–3x slower convs from flash (41 KB of code through the 16 KB cache).
+  - It is kept as the "all-code" point of the idea A test; it is not a recommended build.
+
 ## Lessons
 
 - The worst-case bound analysis belongs in the compiler: it decides data types (int16 vs int32) and proves no overflow. The current interpreter only *asserts* int32 safety at run time.
