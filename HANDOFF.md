@@ -28,10 +28,29 @@ flowchart LR
 | Area | Status |
 | --- | --- |
 | Research and feasibility | ✅ Done (feasibility study, prior art, verification, ideas A–H) |
-| Docs in repo | ✅ `model-as-firmware/` in a private repo |
-| Hardware | ⏳ Shopping list ready; ordering not confirmed. The Pi model you already own is still to be checked (likely a Pi 4) |
-| Code | ❌ Nothing written yet; no code repo yet |
-| Baselines | ❌ BitNetMCU and Atome LM not yet reproduced |
+| Docs in repo | ✅ This repo (`Projects/model-as-firmware`), which holds both docs and code |
+| Hardware | ✅ On hand: one Pico 2 with headers, a micro-USB data cable, a USB power meter (USB-C plug) and a Pi 4. ⏳ Ordered 11 Nov: Debug Probe and a USB-C cable for the meter. Extra Picos, breadboard and wires aren't ordered yet; they're needed only for idea F |
+| Pico bring-up | ✅ Builds, flashes with `picotool load -f -x`, prints over USB serial (COM3). The cycle counter reads 150,251 cycles for 1 ms at 150 MHz, ±108 cycles of jitter over 700k |
+| Energy measurement | ⛔ Blocked: the meter needs a USB-C adapter or cable |
+| BitNetMCU baseline | ✅ Reproduced: ternary CNN80 at 99.45% final / 99.48% best (99.52% reported). The 70% and 90% fc1-zero variants reach 99.44% and 99.50%. See `train/README.md` |
+| Plain-C reference, CMSIS-NN baseline, harness | ✅ Done 11 Nov (steps 4–6). Bit-exact with golden models on 10k images. ref_c: 99.47%, 10.21 ms (9.52 ms from SRAM). CMSIS-NN int8: 99.44%, 18.70 ms (14.52 ms from SRAM, the Gate 1 bar). See `results/README.md` |
+| Compiler v0 (Phase 1 step 7) | ✅ 11 Nov, branch `phase1-compiler-v0`. `compiler/mafc`: front end -> IR -> interpreter -> RP2350 C. Bit-exact on 10k images; 9.33 ms from flash, 8.83 ms from SRAM (1.64x faster than CMSIS-NN). Next: v1 optimizations and idea A (see `notes/compiler.md`) |
+| Compiler v1, second core | ✅ 11 Nov. `--cores 2` splits conv channels and fc1/fc2 rows across both cores. Bit-exact; **4.80 ms from SRAM** (3.0x faster than CMSIS-NN), 5.80 ms from flash. Next: SIMD (SMLAD, proven-safe int16) and idea A for fc1 |
+| Compiler v1, SMLAD | ✅ 11 Nov. Bound analysis (`bounds.py`) proves int16 for conv1/dw1/pool1; SMLAD kernels for dw1 and dw2. Bit-exact; **4.36 ms from SRAM on two cores** (3.33x faster than CMSIS-NN) |
+| Compiler v1, branch-free ReLU | ✅ 11 Nov. The ReLU is written clamp-then-shift, so gcc emits no branch or IT block in the conv loops; this fixed conv1's int16 regression and most of v0's dw1 gap (FINDINGS F14). All mafc builds re-measured: **4.23 ms from SRAM on two cores** (3.44x faster than CMSIS-NN). Next: conv1 SIMD, then fc1 formats and idea A |
+| Compiler v1, conv1 SMLAD + kernel v2 | ✅ 11 Nov. conv1 runs SMLAD on an int16 copy of the image, widened once per inference. The SMLAD kernel was rewritten to fit in registers: (k0,k1)/(k1,k2) packing, `USAT` ReLU, no spills (FINDINGS F15). Bit-exact; **3.05 ms from SRAM on two cores** (4.76x faster than CMSIS-NN), 4.38 ms from flash. fc1 is now the largest stage. Next: fc1 formats and idea A |
+| Compiler v1, fc1 formats / fc1 as code | ✅ 11 Nov. `--ternary {base3,sparse,code,dense}`. Code (idea A) wins: fc1 is 5x faster from SRAM, and it scales with sparsity (z90: fc1 11k vs 131k cycles). The code goes to SRAM even in flash builds (FINDINGS F16). Bit-exact; **2.32 ms from SRAM on two cores** (6.25x faster than CMSIS-NN), 2.89 ms in a flash build. RAM accounting fixed in `run.py`. Next: core balance, fc2, pool1 |
+| Fairness check, Gate 1 | ✅ 11 Nov. The CMSIS-NN baseline is at its best for these shapes (audit). One core against one core: 3.75x. Wide-conv microbenchmark (`firmware/bench/conv_wide`): weights-as-code beats CMSIS-NN 1.19x / 1.65x / 2.7x / 9x at 33/50/70/90% zeros and loses 0.86x when dense. fc2/fc3 (int4) are still 3.6x slower than CMSIS-NN. **Gate 1 met**, with that scope (FINDINGS F17). Energy still open |
+| Gate 0 | ⏳ Met except energy: step 2b waits for the USB-C cable (ordered, along with a Debug Probe) |
+| Compiler v1, fc2/fc3 as code | ✅ 12 Nov. `--int4 {packed,code,dense}`. fc2 as code is 3.4x faster (59k → 17k cycles), level with CMSIS-NN. Bit-exact; **2.15 ms from SRAM on two cores** (6.77x), **3.56 ms on one core (4.08x like-for-like)**; flash builds 2.35 / 3.59 ms (FINDINGS F18) |
+| Idea A three-way test; join fix | ✅ 12 Nov. All-data / hybrid (linear as code) / all-code (`--conv code`): the hybrid is fastest from flash and ties all-code from SRAM with less flash, so **keep the hybrid** (FINDINGS F20). The two-core join wait was a worse inlined copy of the conv kernel on core 1; with a shared `noinline` kernel it is **1.99 ms from SRAM on two cores** (7.28x), 2.27 ms from flash (F19). Next: PR to main, then idea C |
+| Flash traffic measured | ✅ 12 Nov. XIP counters around every `ref_infer()` (`X` command); `flash_read_kb` is filled at last. Per inference: hybrid 1.2 KB, all-data 7–13 KB, CMSIS-NN 45.5 KB, all-code 49 KB; a miss costs ~65–110 cycles (FINDINGS F22) |
+| Idea C in the compiler | ✅ 12 Nov. `--stream`: dense-format layers stream their weights from flash (XIP FIFO, DMA, double buffer). fc1 (30 KB) from flash: 308k → 219k cycles on one core; whole model 6.29 → 5.12 ms (one core), 6.65 → 3.97 ms (two cores). Code in SRAM is still best for MNIST (FINDINGS F23) |
+| Idea C: DMA streaming | ✅ 12 Nov. Benchmark `firmware/bench/stream`: for a 64 KB layer in flash, double-buffered DMA from the XIP stream FIFO is **31% faster** than reading through the cache, and DMA from the uncached alias is slower. **Keep** (FINDINGS F21). Not yet in the compiler (nothing in the MNIST build streams). The RP2350 has XIP counters after all (`ctr_hit`/`ctr_acc`) |
+| Gate 1 | ✅ Met 11 Nov at equal accuracy: 3.75x one core against one core (4.08x after F18), 6.25x with both cores (6.77x after F18). Scope in FINDINGS F17 and "Gate 1"; energy not yet measured |
+| Atome LM baseline | ❌ Not reproduced (Phase 3) |
+
+*Status updated 10 Nov 2026. The step-by-step log is in [GETTING-STARTED.md](GETTING-STARTED.md).*
 
 ## 4. Decisions already made
 
@@ -128,9 +147,9 @@ flowchart LR
 
 ## 9. Open questions for the next session
 
-1. Which Raspberry Pi do you already own (Pi 4? how much RAM)?
-2. Has the shopping list been ordered? (Items 1–6 are needed; 7–8 only if you lack them.)
-3. Where should the code live: a new repo such as `Sods2/model-as-firmware`, or a `code/` folder in this one? The suggestion is a new repo, keeping `Ideas` for docs.
+1. ~~Which Raspberry Pi do you already own?~~ **Answered:** a Pi 4. Still open: how much RAM it has, and whether you have a microSD card and power supply for it.
+2. ~~Has the shopping list been ordered?~~ **Answered:** no. One Pico 2, a data cable and the power meter are on hand, which is enough up to Gate 0. The Debug Probe and the extra Picos can wait.
+3. ~~Where should the code live?~~ **Answered:** in this repo, `Projects/model-as-firmware`.
 4. Which language model to use for Phase 3: Atome LM's model, or a TinyStories-sized ternary model trained from scratch?
 
 ## 10. Suggested code repo layout
