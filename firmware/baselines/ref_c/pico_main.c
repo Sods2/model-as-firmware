@@ -4,12 +4,17 @@
 //   '?'               -> "INFO model=<header> sys_hz=<hz> build=<name>"
 //   'I' + 256 bytes   -> "R <pred> <cycles> <logit0> ... <logit9>"
 //   'T'               -> "T <stage>=<cycles> ..." for the last image
+//   'X'               -> "X <images> <xip_accesses> <xip_hits>": XIP cache counters summed over all images since
+//                        boot (RP2350), counted around ref_infer() only. Misses x 8-byte lines ~ bytes read from flash.
 // Cycles come from the DWT cycle counter and cover ref_infer() only.
 #include <stdio.h>
 #include <stdint.h>
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
 #include "ref_infer.h"
+#if PICO_RP2350
+#include "hardware/structs/xip.h"
+#endif
 
 #ifndef BUILD_NAME
 #define BUILD_NAME "ref_c"
@@ -46,6 +51,7 @@ int main(void) {
     static int8_t img[REF_IMG_PIXELS];
     int32_t logits[REF_N_CLASSES];
     uint32_t n = 0;
+    uint64_t x_acc = 0, x_hit = 0;   // XIP cache accesses and hits during ref_infer(), all images
 
     while (true) {
         int cmd = read_byte();
@@ -54,13 +60,23 @@ int main(void) {
                    (unsigned long)clock_get_hz(clk_sys), BUILD_NAME);
         } else if (cmd == 'I') {
             for (int i = 0; i < REF_IMG_PIXELS; i++) img[i] = (int8_t)read_byte();
+#if PICO_RP2350
+            xip_ctrl_hw->ctr_acc = 0;   // write clears
+            xip_ctrl_hw->ctr_hit = 0;
+#endif
             uint32_t t0 = DWT_CYCCNT;
             uint32_t pred = ref_infer(img, logits);
             uint32_t cycles = DWT_CYCCNT - t0;
+#if PICO_RP2350
+            x_acc += xip_ctrl_hw->ctr_acc;
+            x_hit += xip_ctrl_hw->ctr_hit;
+#endif
             printf("R %lu %lu", (unsigned long)pred, (unsigned long)cycles);
             for (int i = 0; i < REF_N_CLASSES; i++) printf(" %ld", (long)logits[i]);
             printf("\n");
             gpio_put(PICO_DEFAULT_LED_PIN, (++n >> 6) & 1);  // slow blink while busy
+        } else if (cmd == 'X') {
+            printf("X %lu %llu %llu\n", (unsigned long)n, (unsigned long long)x_acc, (unsigned long long)x_hit);
         } else if (cmd == 'T') {
             printf("T");
             for (int i = 0; i < ref_n_stages; i++) printf(" %s=%lu", ref_stage_names[i], (unsigned long)ref_stage_cycles[i]);

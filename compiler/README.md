@@ -81,6 +81,10 @@ Numbers: FINDINGS F16.
 
 Numbers: FINDINGS F18.
 
+## Streamed layers (`--stream`)
+
+`--stream` makes linear layers in a dense format (`--ternary dense` / `--int4 dense`) stream their weights from flash in flash builds. The XIP stream FIFO feeds a DMA channel into a double buffer of 8-row blocks while the CPU computes, and the function runs from SRAM on core 0. In copy_to_ram builds the layer reads its weights directly. File suffix `_stream`, CMake `-DSTREAM=ON`, `measure.sh` 7th field `stream`. This is the placement for weights too big for SRAM; for MNIST, code in SRAM is faster (FINDINGS F23).
+
 ## Conv weights as code (`--conv code`)
 
 `--conv code` (with `--simd`) writes one SMLAD function per conv channel with the kernel words as immediates, called through a table. File suffix `_cvcode`, CMake `-DCONV=code`, `measure.sh` 6th field. It exists for the idea A comparison and is not recommended. It is no faster from SRAM and 2–3x slower from flash, because conv weights are reused across a whole plane anyway (FINDINGS F20).

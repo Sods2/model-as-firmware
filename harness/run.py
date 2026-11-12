@@ -106,6 +106,12 @@ def run_pico(port, img8, stages_out=None):
             rows.append(parse_r(s.readline().decode().strip()))
             if (i + 1) % 1000 == 0:
                 print(f'  {i + 1}/{len(img8)}  ({time.time() - t0:.0f} s)')
+        # XIP cache counters summed over the run (firmware since 12 Nov 2026; older firmware doesn't answer)
+        s.write(b'X')
+        line = s.readline().decode().strip()
+        if line.startswith('X '):
+            n, acc, hit = (int(v) for v in line.split()[1:4])
+            meta['xip'] = (n, acc, hit)
         if stages_out is not None:
             # per-stage cycles of the first test image, re-run so the numbers belong to a known input
             s.write(b'I' + img8[0].tobytes())
@@ -117,6 +123,7 @@ def run_pico(port, img8, stages_out=None):
     return rows, meta
 
 
+XIP_LINE = 8                                   # bytes per RP2350 XIP cache line (one miss fetches one line)
 SRAM_LO, SRAM_HI = 0x20000000, 0x20080000     # main SRAM; the scratch banks above it hold only the stacks
 
 
@@ -193,6 +200,12 @@ def main():
     }
     if args.elf:
         summary['flash_kb'], summary['ram_kb'] = elf_sizes(args.elf, in_ram='_ram' in args.build)
+    xip = meta.get('xip')
+    if xip and xip[0]:
+        # flash_read_kb: XIP cache misses x 8-byte lines, per inference (FINDINGS F22). Uncached XIP accesses
+        # would count as misses too; the measured builds make none.
+        n_img, x_acc, x_hit = xip
+        summary['flash_read_kb'] = round((x_acc - x_hit) * XIP_LINE / n_img / 1024, 2)
 
     print(f'model {args.model}, target {args.target}, {args.n} images')
     print(f'  accuracy           {acc:.2f} %   (PyTorch model: {(t_pred == y).mean() * 100:.2f} %)')
@@ -205,6 +218,10 @@ def main():
               f'  ->  {summary["latency_ms_mean"]} ms at {summary["sys_mhz"]} MHz')
     if args.elf:
         print(f'  flash {summary["flash_kb"]} KB, RAM {summary["ram_kb"]} KB')
+    if xip and xip[0]:
+        n_img, x_acc, x_hit = xip
+        print(f'  XIP per inference  {x_acc / n_img:.0f} accesses, {(x_acc - x_hit) / n_img:.0f} misses '
+              f'(hit rate {x_hit / max(x_acc, 1) * 100:.2f} %)  ->  flash read {summary["flash_read_kb"]} KB')
     if not match.all():
         bad = np.flatnonzero(~match)[:5]
         print(f'  FIRST MISMATCHES: images {bad.tolist()}')

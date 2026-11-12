@@ -52,3 +52,8 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-11 22:40,mafc_v1_dual_simd_code_i4code_cvcode_prof,tern80,pico,200,100.0,100.0,100.0,5.374,806164,793598,926252,150,197.65,129.19,,,all code (idea A): conv + linear as code
 2026-11-11 22:53,mafc_v1_dual_simd_code_i4code_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.997,299499,299402,300016,150,156.55,161.29,,,noinline SMLAD conv kernel (one copy for both cores)
 2026-11-11 22:53,mafc_v1_dual_simd_ram_prof,tern80,pico,200,100.0,100.0,100.0,2.913,436889,436531,437874,150,51.87,56.61,,,noinline SMLAD conv kernel (one copy for both cores)
+2026-11-12 18:51,mafc_v0_simd_dense_prof,tern80,pico,200,100.0,100.0,100.0,6.371,955690,951941,959688,150,73.66,12.68,40.21,,"idea C in the compiler: fc1 dense, streamed vs XIP"
+2026-11-12 18:52,mafc_v0_simd_dense_stream_prof,tern80,pico,200,100.0,100.0,100.0,5.186,777919,775364,876119,150,74.05,18.08,3.09,,"idea C in the compiler: fc1 dense, streamed vs XIP"
+2026-11-12 18:52,mafc_v0_simd_dense_stream_ram_prof,tern80,pico,200,100.0,100.0,100.0,4.288,643178,643080,643590,150,73.91,82.74,0.0,,"idea C in the compiler: fc1 dense, streamed vs XIP"
+2026-11-12 18:52,mafc_v1_dual_simd_dense_prof,tern80,pico,200,100.0,100.0,100.0,6.727,1009061,1000399,1037543,150,75.48,14.21,42.95,,"idea C in the compiler: fc1 dense, streamed vs XIP"
+2026-11-12 18:53,mafc_v1_dual_simd_dense_stream_prof,tern80,pico,200,100.0,100.0,100.0,4.032,604804,601320,710531,150,75.76,19.62,4.89,,"idea C in the compiler: fc1 dense, streamed vs XIP"

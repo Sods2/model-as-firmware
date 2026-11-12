@@ -362,9 +362,10 @@ PAR_MIN_MACS = 4096   # linear layers smaller than this stay on core 0 (the hand
 
 TERNARY_FORMATS = ('base3', 'sparse', 'code', 'dense')
 INT4_FORMATS = ('packed', 'code', 'dense')
+STREAM_BLOCK_ROWS = 8   # rows per streamed weight block (double-buffered)
 
 
-def emit_linear_fmt(node, fmt, rows):
+def emit_linear_fmt(node, fmt, rows, stream=False):
     """A ternary or int4sym linear layer in one of the alternative formats (base3 / packed are emit_linear). Returns
     (weights C text, function C text, C statement to run before the call or None, extra globals C text).
     Every function takes (in, out, o0, o1) when rows is True, else (in, out).
@@ -374,6 +375,7 @@ def emit_linear_fmt(node, fmt, rows):
               3 * (in[2] - in[9] ...) + 5 * (...) + ...  (one add/sub per weight, at most 8 multiplies per row).
       dense:  the weights as int8, 4 per word, unpacked with SXTB16 and multiplied with SMLAD against an int16
               copy of the input (widened once, before the call). Ternary or int4sym.
+              stream=True: the weights are streamed from flash in blocks by DMA (idea C, --stream).
     sparse is ternary only."""
     w = node.weights
     n_out, n_in = w.shape
@@ -457,6 +459,87 @@ __attribute__((noinline)) static void MAFC_IN_SRAM({nm}){sig} {{
         k = n_in // 4
         data = c_array('uint32_t', f'{nm}_w', words, '0x{:08X}', 8)
         glob = f'static int16_t {nm}_a16[{n_in}] __attribute__((aligned(4)));   // {nm} input widened to int16\n'
+
+        if stream:
+            assert not rows, 'a streamed layer runs on core 0 only (the XIP stream FIFO is a single resource)'
+            R = STREAM_BLOCK_ROWS
+            nb = (n_out + R - 1) // R
+            glob += f'static uint32_t {nm}_sbuf[2][{R * k}];   // {nm}: double buffer for streamed weight blocks\n'
+            fn = f'''// {nm}: linear {n_in} -> {n_out}, {q} as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input.
+// Streamed (idea C, FINDINGS F21): when the weights are in flash, the XIP stream FIFO feeds a DMA channel that
+// fills one SRAM buffer with the next {R} rows while the CPU computes the previous {R}. When they are in SRAM
+// (copy_to_ram build), the rows are read directly. On the PC, memcpy plays the DMA, so the block logic is checked.
+#ifndef MAFC_IN_SRAM
+#if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
+#include "pico.h"
+#define MAFC_IN_SRAM(f) __not_in_flash_func(f)   // section .time_critical.<f>, copied to SRAM at boot
+#else
+#define MAFC_IN_SRAM(f) f
+#endif
+#endif
+#if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
+#include "hardware/dma.h"
+#include "hardware/structs/xip.h"
+#include "hardware/structs/xip_aux.h"
+#include "hardware/regs/addressmap.h"
+#endif
+static inline void {nm}_widen(const int8_t *restrict in) {{
+    for (int i = 0; i < {n_in}; i++) {nm}_a16[i] = in[i];
+}}
+__attribute__((always_inline)) static inline void {nm}_rows(const uint32_t *restrict w, int32_t *restrict out, int n) {{
+    for (int o = 0; o < n; o++) {{
+        const int16_t *a = {nm}_a16;
+        int32_t s = 0;
+        for (int j = 0; j < {k}; j++) {{
+            uint32_t ww = *w++, a01, a23;
+            memcpy(&a01, a + 4 * j, 4);
+            memcpy(&a23, a + 4 * j + 2, 4);
+            s = SMLAD(SXTB16(ww), a01, s);
+            s = SMLAD(SXTB16_ROR8(ww), a23, s);
+        }}
+        out[o] = s;
+    }}
+}}
+__attribute__((noinline)) static void MAFC_IN_SRAM({nm})(const int8_t *restrict in, int32_t *restrict out) {{
+    (void)in;
+#if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
+    const uintptr_t wa = (uintptr_t){nm}_w;
+    if (wa >= XIP_BASE && wa < XIP_NOCACHE_NOALLOC_BASE) {{       // weights in flash: stream them
+        static int ch = -1;
+        if (ch < 0) ch = dma_claim_unused_channel(true);
+        xip_ctrl_hw->stream_ctr = 0;
+        while (!(xip_ctrl_hw->stat & XIP_STAT_FIFO_EMPTY_BITS)) (void)xip_aux_hw->stream;
+        xip_ctrl_hw->stream_addr = (uint32_t)wa;
+        xip_ctrl_hw->stream_ctr = {n_out * k};
+        dma_channel_config c = dma_channel_get_default_config(ch);
+        channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+        channel_config_set_read_increment(&c, false);
+        channel_config_set_write_increment(&c, true);
+        channel_config_set_dreq(&c, DREQ_XIP_STREAM);
+        const void *src = (const void *)&xip_aux_hw->stream;
+        dma_channel_configure(ch, &c, {nm}_sbuf[0], src, {min(R, n_out) * k}, true);
+        for (int b = 0; b < {nb}; b++) {{
+            const int r0 = b * {R}, nr = {n_out} - r0 < {R} ? {n_out} - r0 : {R};
+            dma_channel_wait_for_finish_blocking(ch);
+            if (b + 1 < {nb}) {{
+                const int r1 = r0 + {R}, nr1 = {n_out} - r1 < {R} ? {n_out} - r1 : {R};
+                dma_channel_configure(ch, &c, {nm}_sbuf[(b + 1) & 1], src, nr1 * {k}, true);
+            }}
+            {nm}_rows({nm}_sbuf[b & 1], out + r0, nr);
+        }}
+        return;
+    }}
+    {nm}_rows({nm}_w, out, {n_out});                          // weights in SRAM: read them directly
+#else
+    for (int b = 0; b < {nb}; b++) {{                          // PC: the same blocks, memcpy as the DMA
+        const int r0 = b * {R}, nr = {n_out} - r0 < {R} ? {n_out} - r0 : {R};
+        memcpy({nm}_sbuf[b & 1], {nm}_w + r0 * {k}, (size_t)nr * {k} * 4);
+        {nm}_rows({nm}_sbuf[b & 1], out + r0, nr);
+    }}
+#endif
+}}
+'''
+            return data, fn, f'{nm}_widen', glob
         fn = f'''// {nm}: linear {n_in} -> {n_out}, {q} as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input
 static inline void {nm}_widen(const int8_t *restrict in) {{
     for (int i = 0; i < {n_in}; i++) {nm}_a16[i] = in[i];
@@ -485,7 +568,7 @@ static inline void {nm}{sig} {{
 CONV_FORMATS = ('data', 'code')
 
 
-def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data'):
+def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False):
     """cores=2: the channel-fused conv segment and the big linear layers are split across both M33 cores.
     Core 1 runs a job loop fed by the SIO FIFO; on the PC build the core-1 jobs simply run inline first."""
     assert cores in (1, 2)
@@ -505,6 +588,13 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
     par_linear = set()
     if cores == 2:
         par_linear = {nd.name for nd in rest if nd.op == 'linear' and nd.weights.size >= PAR_MIN_MACS}
+    # --stream: layers in a dense format stream their weights from flash (idea C); one stream FIFO, so core 0 only
+    streamed = set()
+    if stream:
+        streamed = {nd.name for nd in rest if nd.op == 'linear' and
+                    {'ternary': ternary, 'int4sym': int4}.get(nd.attrs['quant']) == 'dense'}
+        assert streamed, '--stream needs a dense-format layer (--ternary dense or --int4 dense)'
+        par_linear -= streamed
     stage_names = [nodes[i].name for i in seg] + (['join'] if cores == 2 else []) + \
                   [nd.name for nd in rest if nd.op == 'linear']
     stage_id = {n: k for k, n in enumerate(stage_names)}
@@ -565,7 +655,7 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
             fmt = {'ternary': ternary if ternary != 'base3' else None,
                    'int4sym': int4 if int4 != 'packed' else None}.get(nd.attrs['quant'])
             if fmt:
-                d, f, pre, glob = emit_linear_fmt(nd, fmt, rows=nd.name in par_linear)
+                d, f, pre, glob = emit_linear_fmt(nd, fmt, rows=nd.name in par_linear, stream=nd.name in streamed)
                 if pre:
                     pre_call[nd.name] = pre
                 extra_globals += glob
@@ -688,10 +778,10 @@ static inline void join_job(void) {{}}
     ]
 
     variant = ('v0 (one core' if cores == 1 else 'v1 (two cores') + (', SMLAD on int16 planes' if simd else '') + \
-              (f', ternary as {ternary}' if ternary != 'base3' else '') + (f', int4 as {int4}' if int4 != 'packed' else '') + (', conv weights as code' if conv == 'code' else '')
+              (f', ternary as {ternary}' if ternary != 'base3' else '') + (f', int4 as {int4}' if int4 != 'packed' else '') + (', conv weights as code' if conv == 'code' else '') + (', dense layers streamed from flash' if stream else '')
     names = ', '.join(f'"{n}"' for n in stage_names)
     regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '') + (' --simd' if simd else '') + \
-            (f' --ternary {ternary}' if ternary != 'base3' else '') + (f' --int4 {int4}' if int4 != 'packed' else '') + (' --conv code' if conv == 'code' else '')
+            (f' --ternary {ternary}' if ternary != 'base3' else '') + (f' --int4 {int4}' if int4 != 'packed' else '') + (' --conv code' if conv == 'code' else '') + (' --stream' if stream else '')
     desc = '\n'.join('//   ' + l for l in graph.describe().splitlines())
     head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c {variant}, all weights as packed data).
 // Source: {source}
@@ -736,12 +826,12 @@ static int8_t act[{tail_max}];
             '\n'.join(body) + '\n}\n')
 
 
-def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data'):
+def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     c_path = out_dir / (f'mafc_{graph.name}' + ('_dual' if cores == 2 else '') + ('_simd' if simd else '') +
                         (f'_{ternary}' if ternary != 'base3' else '') + (f'_i4{int4}' if int4 != 'packed' else '') +
-                        ('_cvcode' if conv == 'code' else '') + '.c')
-    c_path.write_text(generate(graph, source, cores, simd, ternary, int4, conv), encoding='utf-8', newline='\n')
+                        ('_cvcode' if conv == 'code' else '') + ('_stream' if stream else '') + '.c')
+    c_path.write_text(generate(graph, source, cores, simd, ternary, int4, conv, stream), encoding='utf-8', newline='\n')
     (out_dir / f'mafc_{graph.name}.ir.json').write_text(graph.to_json(), encoding='utf-8', newline='\n')
     return c_path

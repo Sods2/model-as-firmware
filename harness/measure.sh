@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Build, flash and measure any set of builds on the Pico 2 (Git Bash, from the repo root).
 #
-#   harness/measure.sh <profile|final> <csv> <build:model:mem[:ternary[:int4[:conv]]]> ...
+#   harness/measure.sh <profile|final> <csv> <build:model:mem[:ternary[:int4[:conv[:stream]]]]> ...
 #     build  ref_c | cmsis_nn | mafc | mafc2 (dual-core) | mafc_s (SMLAD) | mafc2_s (dual-core + SMLAD)
 #     model  tern80 | tern80z70 | tern80z90
 #     mem    flash | ram          (ram = copy_to_ram: code and weights in SRAM)
 #     ternary  base3 (default) | sparse | code | dense   (mafc builds: format of fc1, compile.py --ternary)
 #     int4     packed (default) | code | dense           (mafc builds: format of fc2/fc3, compile.py --int4)
 #     conv     data (default) | code                     (mafc SIMD builds: conv weights, compile.py --conv)
+#     stream   nostream (default) | stream               (mafc: dense layers streamed from flash, compile.py --stream)
 #
 #   profile: 200 images, stage counters on;  final: 10k images, counters off.
 #   e.g.  harness/measure.sh final results/phase1.csv mafc:tern80:flash mafc:tern80:ram
@@ -34,8 +35,8 @@ flash() {
 }
 
 for spec in "$@"; do
-  IFS=: read -r build model mem tern i4 cv <<< "$spec"
-  tern=${tern:-base3}; i4=${i4:-packed}; cv=${cv:-data}
+  IFS=: read -r build model mem tern i4 cv st <<< "$spec"
+  tern=${tern:-base3}; i4=${i4:-packed}; cv=${cv:-data}; st=${st:-nostream}
   extra=
   case $build in
     ref_c)    src=firmware/baselines/ref_c;    golden=ref ;;
@@ -51,8 +52,10 @@ for spec in "$@"; do
   [ "$tern" != base3 ] && dir=$src/build-$build-$model-$mem-$tern$SUFFIX
   [ "$i4" != packed ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4$SUFFIX
   [ "$cv" != data ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4-cv$cv$SUFFIX
+  [ "$st" = stream ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4-cv$cv-stream$SUFFIX
+  stream_flag=OFF; [ "$st" = stream ] && stream_flag=ON
   ram=OFF; [ "$mem" = ram ] && ram=ON
-  cmake -S $src -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODEL=$model -DRUN_FROM_RAM=$ram -DPROFILE_STAGES=$PROF -DTERNARY=$tern -DINT4=$i4 -DCONV=$cv ${extra:-} >/dev/null
+  cmake -S $src -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODEL=$model -DRUN_FROM_RAM=$ram -DPROFILE_STAGES=$PROF -DTERNARY=$tern -DINT4=$i4 -DCONV=$cv -DSTREAM=$stream_flag ${extra:-} >/dev/null
   ninja -C "$dir" >/dev/null
   flash "$dir/$target.uf2"
   $PY harness/run.py --model $model --target pico --port "$PORT" --golden $golden --n $N \

@@ -58,6 +58,7 @@ PT=~/.pico-sdk/picotool/2.3.1/picotool/picotool.exe
 ## Measuring flash traffic (open question)
 
 - **Correction (12 Nov 2026):** the RP2350 *has* XIP cache counters: `xip_ctrl_hw->ctr_hit` and `ctr_acc` (`hardware/structs/xip.h`, registers `XIP_CTR_HIT` / `XIP_CTR_ACC` at `XIP_CTRL_BASE + 0x0c / 0x10`; write to clear). The 11 Nov check that found "none" looked in the wrong header. Misses = acc − hit; times the 8-byte line size, that gives about the bytes fetched through the cache. Uncached and DMA/stream reads are not counted as hits.
+- **Used since 12 Nov 2026:** `pico_main.c` clears and sums the two counters around every `ref_infer()` (command `X`); `run.py` turns them into `flash_read_kb` (FINDINGS F22).
 - The XIP stream FIFO (`stream_addr`, `stream_ctr`, read via `xip_aux_hw->stream` with `DREQ_XIP_STREAM`) is the fast path for DMA from flash (FINDINGS F21).
 - Options still to check: work out bytes read from the weight layout and the 16 KB cache (analytically); the QMI or bus-performance counters in the RP2350 datasheet; or compare the same build with `RUN_FROM_RAM` on and off, as the CMSIS-NN fc1 experiment already did (524k vs 71k cycles).
 
@@ -65,6 +66,10 @@ PT=~/.pico-sdk/picotool/2.3.1/picotool/picotool.exe
 
 - Functions placed in SRAM with `__not_in_flash_func` / `__time_critical_func` land in `.data`, which is an executable section. Berkeley-format `size` therefore reports them as **text** and `data` as 0, even though they occupy SRAM at run time (found 11 Nov 2026: an 86 KB fc1 showed up as 9.7 KB of RAM).
 - Use `arm-none-eabi-size -A` and sum the sections at `0x20000000`–`0x2007FFFF` (main SRAM; the stacks are in the scratch banks above). `harness/run.py` does this since 11 Nov 2026.
+
+## Gotcha: measure.sh hides compiler errors
+
+- `measure.sh` sends cmake and ninja output to `/dev/null`, so a build error just stops the batch (`set -e`) with nothing printed after the cmake lines. If a batch ends early with no `board:` line, rebuild the failing folder by hand (`ninja -C <build dir>`) to see the error. Happened on 12 Nov 2026 with a broken `printf` string.
 
 ## Gotcha: only one thing can use the board, and Git Bash `ps` doesn't see Windows processes
 

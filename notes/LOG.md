@@ -2,6 +2,23 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 12 Nov 2026 (later): idea C in the compiler (`--stream`)
+
+- `compile.py --stream`: dense-format linear layers stream their weights from flash (XIP stream FIFO, DMA, 8-row double buffer, SRAM function, core 0 only). Bit-exact on the PC (memcpy blocks) and on the board.
+- fc1 dense (30 KB), flash builds:
+  - fc1 stage: 308k → **219k** cycles on one core; two cores in place 526k → **219k** streamed.
+  - Whole model: 6.29 → 5.12 ms (one core), 6.65 → 3.97 ms (two cores).
+- Side effect: fc1 no longer thrashes the cache, so dw2 (52k → 30k) and fc2 (105k → 72k) got faster too.
+- The XIP counters don't see streamed bytes (they bypass the cache); noted under F22. FINDINGS F23.
+
+## 12 Nov 2026: flash traffic measured (XIP counters)
+
+- `pico_main.c`: clears `xip_ctrl_hw->ctr_acc/ctr_hit` before each `ref_infer()` and sums them; new `X` command. `run.py` reads it and fills `flash_read_kb` = misses × 8 B per inference.
+- First attempt failed to build: a heredoc turned `\n` inside a C string into a real newline. measure.sh hides compiler output, so the batch stopped silently (gotcha in pico-toolchain.md).
+- 10k-image finals of 10 builds:
+  - flash read per inference: ref_c 8.0 KB; CMSIS-NN 45.5 KB; mafc all-data 7.0–13.1 KB; **hybrid 1.2–1.3 KB**; all-code 49–51 KB; SRAM build 0.
+  - Hit rates are 98.4–99.96%; a miss costs ~65–110 cycles. FINDINGS F22.
+
 ## 12 Nov 2026 (night): idea C, DMA streaming from flash
 
 - New benchmark `firmware/bench/stream` + `harness/bench_stream.py`: a dense int8 256→256 layer, 64 KB of weights in flash, the same SMLAD kernel fed seven ways. All bit-exact.

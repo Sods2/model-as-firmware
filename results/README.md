@@ -149,6 +149,38 @@ All bit-exact on all 10,000 images.
 
 All tern80, bit-exact on all 10,000 images. Idea A verdict and table: FINDINGS F20.
 
+### Flash traffic (`notes` = `XIP counters: flash traffic`)
+
+From 12 Nov 2026, `flash_read_kb` is filled for board runs: XIP cache misses × 8 bytes per inference (reads through the cache only; DMA-streamed bytes are not counted), from the RP2350's `ctr_acc`/`ctr_hit` counters around `ref_infer()` (FINDINGS F22). Rows from before are empty, because their firmware didn't report the counters. These rows also re-measure each build's latency.
+
+| Build (flash) | Latency | Flash read / inference | Hit rate |
+|---|---|---|---|
+| ref_c | 10.08 ms | 8.02 KB | 99.90% |
+| cmsis_nn | 18.70 ms | 45.48 KB | 99.65% |
+| mafc_v0 | 8.67 ms | 6.98 KB | 99.90% |
+| mafc_v0_simd | 5.97 ms | 9.93 KB | 99.81% |
+| mafc_v0_simd_code_i4code (hybrid) | 3.58 ms | **1.16 KB** | 99.96% |
+| mafc_v0_simd_code_i4code_cvcode (all-code) | 6.30 ms | 49.02 KB | 98.40% |
+| mafc_v1_dual_simd | 4.32 ms | 13.11 KB | 99.74% |
+| mafc_v1_dual_simd_code_i4code (hybrid) | 2.30 ms | **1.34 KB** | 99.96% |
+| mafc_v1_dual_simd_code_i4code_cvcode (all-code) | 6.67 ms | 50.75 KB | 98.35% |
+| mafc_v1_dual_simd_code_i4code (SRAM build) | 1.99 ms | 0 | (no XIP accesses) |
+
+Note: the ref_c and cmsis_nn rows of this run are in `phase1.csv` (their earlier rows are in `phase0.csv`).
+
+### Streamed fc1 (`notes` = `idea C in the compiler: fc1 dense, streamed vs XIP`)
+
+fc1 in the dense format (30 KB of int8 weights), flash builds, with and without `--stream` (FINDINGS F23). For the streamed builds, `flash_read_kb` counts only reads through the cache; the 30 KB streamed by DMA comes on top.
+
+| Build | Latency | flash_read_kb (via cache) |
+|---|---|---|
+| mafc_v0_simd_dense | 6.29 ms | 39.85 |
+| mafc_v0_simd_dense_stream | **5.12 ms** | 2.94 (+30 streamed) |
+| mafc_v1_dual_simd_dense | 6.65 ms | 42.46 |
+| mafc_v1_dual_simd_dense_stream | **3.97 ms** | 4.35 (+30 streamed) |
+
+All bit-exact on all 10,000 images.
+
 ### Idea C: DMA streaming benchmark (`bench_stream.csv`)
 
 A dense int8 linear layer, 256→256, with its 64 KB of weights in flash and the same SMLAD kernel throughout. One row per variant, with the min and mean cycles of 10 runs and an on-board bit-exact check. Produced by `harness/bench_stream.py run` (FINDINGS F21).

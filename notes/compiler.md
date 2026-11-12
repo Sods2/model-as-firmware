@@ -212,6 +212,20 @@ Two-core SRAM profile now: conv1 127k (39%), dw1 94k (29%), pool1 23k (7%), dw2 
   - The result (F20): no gain from SRAM, 2–3x slower convs from flash (41 KB of code through the 16 KB cache).
   - It is kept as the "all-code" point of the idea A test; it is not a recommended build.
 
+### v1 step 8: streamed layers (`compile.py --stream`, 12 Nov 2026)
+
+`--stream` applies to linear layers in a dense format (`--ternary dense`, `--int4 dense`). `emit_linear_fmt(stream=True)` writes the layer as a `noinline` function in SRAM (`MAFC_IN_SRAM`):
+- **Weights in flash** (checked at run time, `XIP_BASE <= w < XIP_NOCACHE_NOALLOC_BASE`):
+  - start an XIP stream of the whole array;
+  - DMA (paced by `DREQ_XIP_STREAM`, reading `xip_aux_hw->stream`) fills one of two SRAM buffers with the next 8 rows (`STREAM_BLOCK_ROWS`);
+  - meanwhile the CPU runs the `SXTB16`/`SMLAD` rows on the other buffer.
+- **Weights in SRAM** (copy_to_ram): direct.
+- **PC:** the same blocks with `memcpy`.
+- **Cores and channels:** a streamed layer is removed from `par_linear` (core 0 only). The DMA channel is claimed on first use.
+- **Names:** suffix `_stream`, CMake `-DSTREAM=ON`, `measure.sh` 7th field `stream`. `hardware_dma` is now linked into every mafc build.
+
+fc1 dense from flash: 308k → 219k cycles (one core), and 526k → 219k against two cores sharing the cache. Whole model 6.29 → 5.12 ms (one core) and 6.65 → 3.97 ms (two cores). FINDINGS F23.
+
 ## Lessons
 
 - The worst-case bound analysis belongs in the compiler: it decides data types (int16 vs int32) and proves no overflow. The current interpreter only *asserts* int32 safety at run time.

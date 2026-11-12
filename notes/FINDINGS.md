@@ -342,6 +342,58 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 - **Where it applies:** layers whose weights stay as data and don't fit SRAM or the cache. In today's best MNIST build no layer is like that: the linear layers are code in SRAM, and the conv weights fit the cache. So it matters for the larger models of later phases (and for idea G, the SRAM cache over flash). The compiler doesn't emit it yet.
 - **Correction:** the RP2350 *does* have XIP cache counters (`xip_ctrl_hw->ctr_hit`, `ctr_acc` in `hardware/structs/xip.h`); [pico-toolchain.md](pico-toolchain.md) wrongly said it had none. Bytes read from flash per inference can be measured with them (open question below).
 
+### F22. Flash traffic measured: the hybrid reads 1.2 KB from flash per inference, CMSIS-NN 45 KB
+- **Method:** the board firmware (`pico_main.c`, shared by every build) clears the RP2350 XIP cache counters `ctr_acc`/`ctr_hit` before each `ref_infer()` and adds them up afterwards. The PC reads them with the new `X` command.
+  - Flash read = misses × 8-byte lines (`XIP_CACHE_LINE_SIZE` in the SDK).
+  - `run.py` now fills the `flash_read_kb` column, empty since Phase 0, and prints accesses, misses and the hit rate.
+  - The counters cover both cores and include instruction fetches. They do **not** see DMA/stream reads, which bypass the cache (F23).
+- **Results (tern80, flash builds, 10k images, bit-exact):**
+
+  | Build | Latency | XIP accesses | Misses | Flash read / inference | SRAM build | Cost per miss* |
+  |---|---|---|---|---|---|---|
+  | ref_c | 10.08 ms | 1.03M | 1,027 | 8.0 KB | 9.52 ms | ~82 cycles |
+  | CMSIS-NN int8 | 18.70 ms | 1.67M | 5,821 | **45.5 KB** | 14.52 ms | ~108 |
+  | mafc v0 (all data) | 8.67 ms | 0.90M | 893 | 7.0 KB | 8.18 ms | ~82 |
+  | mafc v0 + SMLAD (all data) | 5.97 ms | 0.66M | 1,271 | 9.9 KB | 5.23 ms | ~87 |
+  | **mafc one core, hybrid** (linear as code in SRAM) | 3.58 ms | 0.39M | 149 | **1.2 KB** | 3.56 ms | (noise) |
+  | mafc one core, all-code | 6.30 ms | 0.39M | 6,274 | 49.0 KB | 3.58 ms | ~65 |
+  | mafc two cores, all data | 4.32 ms | 0.64M | 1,678 | 13.1 KB | 2.91 ms | (two cores) |
+  | **mafc two cores, hybrid** | 2.30 ms | 0.39M | 172 | **1.3 KB** | 1.99 ms | (two cores) |
+  | mafc two cores, all-code | 6.67 ms | 0.39M | 6,496 | 50.8 KB | 1.95 ms | (two cores) |
+
+  \* (flash latency − SRAM latency) / misses, one core. A rough figure: it also folds in the slower hits.
+  The two-core hybrid SRAM build reads nothing from flash (0 accesses), as expected.
+- **Reading:**
+  - Hit rates are 98.4–99.96% everywhere, so hits are cheap. The misses set the flash penalty, at roughly 65–110 cycles per 8-byte line (≈ 8–14 cycles per byte). That is a bit worse than the 6.7 cycles/byte of sequential streaming (F21), because misses are scattered.
+  - The hybrid reads **35x less** from flash than CMSIS-NN (1.2 vs 45.5 KB). That is why its flash build runs within 1% of its SRAM build, while CMSIS-NN loses 29%.
+  - All-code reads 49 KB. The conv functions' code doesn't fit the cache, which confirms F20's explanation with a direct measurement.
+  - With two cores, the all-data build misses 32% more than with one (13.1 vs 9.9 KB): the cores evict each other's lines, as F12 suspected.
+- **Meaning:** "bytes read from flash per inference" (a metric in the logging table since Phase 0) is now measured for every flash build. For MNIST it confirms the premise: what the compiler places in SRAM, and what it keeps compact, decides flash traffic, and flash traffic decides the flash penalty.
+
+### F23. Idea C in the compiler: streaming a 30 KB layer from flash makes it 29% faster on one core, and 58% faster than two cores fighting over the cache
+- **Evidence:** `compile.py --stream` makes the dense-format linear layers (here fc1 with `--ternary dense`, 30 KB of int8 weights) stream their weights in flash builds.
+  - The XIP stream FIFO feeds a DMA channel into a double buffer of 8-row blocks, while the CPU computes the previous block (F21's mechanism).
+  - The function runs from SRAM. A streamed layer runs on core 0 only (there is one stream FIFO).
+  - In a copy_to_ram build it detects that the weights are in SRAM and reads them directly.
+  - Checks: bit-exact on the PC, where `memcpy` stands in for the DMA so the block logic is exercised, and on the board (10k images).
+
+  | Build (fc1 dense) | fc1 stage | Whole model | Flash read via cache (F22) |
+  |---|---|---|---|
+  | one core, flash, in place through the cache | 308k | 6.29 ms | 39.9 KB |
+  | one core, flash, **streamed** | **219k (−29%)** | **5.12 ms (−19%)** | 2.9 KB + 30 KB streamed |
+  | two cores, flash, in place (both cores read fc1) | 526k | 6.65 ms | 42.5 KB |
+  | two cores, flash, **streamed** (core 0) | **219k (−58%)** | **3.97 ms (−40%)** | 4.4 KB + 30 KB streamed |
+  | one core, SRAM build (direct, for reference) | 107k | 4.29 ms (profile) | 0 |
+
+- **Reading:**
+  - The streamed fc1 is transfer-bound: 30 KB at about 7 cycles per byte is about 210k cycles, and the 107k of compute is hidden.
+  - It also stops fc1's weights from evicting everything else from the cache. Misses through the cache fell from 5.1k to 0.4k per inference, and the other flash-resident layers sped up: dw2 52k → 30k, fc2 105k → 72k (one core).
+  - Splitting a flash-bound layer across two cores is counter-productive (526k against 308k on one core). Streaming it on one core beats both.
+- **Caveat for F22:** the XIP counters see only cached accesses. Streamed bytes bypass the cache, so for streamed builds `flash_read_kb` must be read as "via the cache"; the streamed bytes (the layer size) come on top.
+- **Meaning:**
+  - The compiler can now choose per layer between three placements: code in SRAM (best, F16/F18), data in the cache, and data streamed from flash.
+  - For MNIST, code in SRAM still wins: fc1 as code takes 51k cycles. Streaming is the fallback for weights that are too big for SRAM, which is where later phases go.
+
 ## Gate 1
 
 **Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images), mafc is faster than CMSIS-NN in every like-for-like setup:
@@ -360,15 +412,15 @@ Scope (F5, F17):
 | Question | How to test | Status |
 |---|---|---|
 | Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b) | Waiting for cable |
-| Bytes actually read from flash per inference | The RP2350 has XIP counters after all (`ctr_hit`, `ctr_acc`; F21). Read them around `ref_infer()` in the harness | Open, now measurable |
-| Idea C: DMA streaming of weights | F21: stream FIFO + double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. Not yet emitted by the compiler (no layer in the current best build needs it) | Done (benchmark) |
+| Bytes actually read from flash per inference | F22: measured with the XIP counters for every flash build (`flash_read_kb`): hybrid 1.2 KB, CMSIS-NN 45.5 KB | Done |
+| Idea C: DMA streaming of weights | F21: the stream FIFO with double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. F23: in the compiler (`--stream`), the 30 KB fc1 runs 29% faster on one core and 58% faster than two cores sharing the cache | Done |
 | How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |
 | Where does the remaining time go? (two cores, all linear as code) | Join wait fixed (F19). Now conv1 42%, dw1 31%, pool1 8%, fc1 9%: the conv stack is about 85%. Candidates: fuse pool1 into dw1, conv1 channel pairs | Open |
 | Idea A: code vs data vs hybrid | F20: keep the hybrid (linear layers as code, conv weights as data) | Done |
 | Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Wide-conv microbenchmark (F17): yes for ternary weights with ≥ ~14% zeros (1.19x at 33%, 1.65x at 50%, 9x at 90%); no for dense ternary (0.86x). Still open: a whole wide model, and int8 layers | Answered for one layer |
 | Make int4/int8 layers competitive (fc2/fc3 were 3.6x slower than CMSIS-NN) | F18: fc2 as code is level with CMSIS-NN (17.4k vs 16.6k cycles); dense SMLAD 22.6k. int8 untested | int4 done |
-| Is the second core's flash penalty about cache thrashing or bandwidth? | Contention measured (F12): moderate on convs, strong on fc1. With fc1 as code in SRAM (F16), the flash build is 2.89 ms against 2.32 ms all-SRAM. The remaining 25% is the convs and fc2 from flash | Partly answered |
+| Is the second core's flash penalty about cache thrashing or bandwidth? | Contention measured (F12): moderate on convs, strong on fc1. With fc1 as code in SRAM (F16), the flash build is 2.89 ms against 2.32 ms all-SRAM. The remaining 25% is the convs and fc2 from flash. F22: thrashing contributes; with two cores the all-data build misses 32% more (13.1 vs 9.9 KB per inference) | Answered |
 
 ## Caveats
 
