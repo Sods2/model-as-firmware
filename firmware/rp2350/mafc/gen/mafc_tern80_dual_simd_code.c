@@ -49,7 +49,8 @@ static int8_t act[320];
 #define SMLATB(a, b, acc) __smlatb((int32_t)(a), (int32_t)(b), (acc))
 #define USAT(x, bits)     __usat((x), (bits))
 #define SXTB16(x)         __sxtb16(x)
-#define SXTB16_ROR8(x)    __sxtb16(__ror((x), 8))
+// gcc doesn't fold __ror into sxtb16 (one extra instruction), so the rotated form is written directly
+static inline uint32_t SXTB16_ROR8(uint32_t x) { uint32_t r; __asm__("sxtb16 %0, %1, ror #8" : "=r"(r) : "r"(x)); return r; }
 #else
 static inline uint32_t SXTB16(uint32_t x) {
     return ((uint32_t)(uint16_t)(int16_t)(int8_t)x) | ((uint32_t)(uint16_t)(int16_t)(int8_t)(x >> 16) << 16);

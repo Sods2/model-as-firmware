@@ -394,6 +394,46 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - The compiler can now choose per layer between three placements: code in SRAM (best, F16/F18), data in the cache, and data streamed from flash.
   - For MNIST, code in SRAM still wins: fc1 as code takes 51k cycles. Streaming is the fallback for weights that are too big for SRAM, which is where later phases go.
 
+### F24. int8 layers: level with CMSIS-NN once the dense kernel does 4 rows at a time; the whole int8 model is 3.9x faster on one core, and weights as code stop paying from SRAM
+- **Setup:**
+  - New model `int8_80`: the same CNN as tern80 with every linear layer int8 (BitNetMCU `8bit`, config `train/configs/int8_cnn80.yaml`). 99.43% PyTorch, 99.45% integer pipeline.
+  - The convs were already int8, so only fc1 (30,720 weights, 5% zero), fc2 (6,144) and fc3 (640) change.
+  - Golden model, ref_c and the front end decode BitNetMCU's 8-bit layers. `compile.py --int8 {plain,dense,code}` picks the format. CMSIS-NN runs the same weights (`export_cmsis.py --model int8_80`).
+  - Checks: all variants bit-exact on the PC (10k images) and on the board (10k images).
+- **First result:** CMSIS-NN won the int8 linear layers. Our dense format (`SXTB16`/`SMLAD`, one row at a time) took 111k cycles for fc1 against CMSIS-NN's 71k.
+- **Fix: 4 rows at a time.** `dense_rows()` computes 4 rows together, so each pair of int16 activations is loaded once and feeds 4 rows' `SMLAD`s. CMSIS-NN's `vec_mat_mult` does the same with 2 rows, and has to unpack int8 activations.
+  - The rotate is written as `sxtb16 r, r, ror #8` (inline asm); gcc never folded `__ror` into it.
+  - The inner loop is 24 instructions per 16 MACs, with no spills (`asm_loops.py`). It still takes about 40 cycles per iteration; load latency and SRAM bus contention are the likely cause (not measured).
+
+  | Layer (one core, SRAM, cycles) | CMSIS-NN | plain int8 loop | dense, 1 row | dense, 2 rows | **dense, 4 rows** | dense, 8 rows (spills) | code |
+  |---|---|---|---|---|---|---|---|
+  | fc1 (30,720 weights) | 70.9k | 199.6k | 110.7k | 85.1k | **75.9k** | 86.7k | 85.3k |
+  | fc2 (6,144) | 16.4k | 46.9k | 22.6k | 17.3k | **16.5k** | 19.0k | 21.3k |
+  | fc3 (640) | 2.1k | 5.3k | 3.3k | | **3.1k** | 3.3k | 3.3k |
+
+- **Whole int8 model (10k images, bit-exact):**
+
+  | Build | SRAM build | Flash build | SRAM used (flash build) | Flash read / inference |
+  |---|---|---|---|---|
+  | CMSIS-NN int8 | 14.54 ms | 18.74 ms | 37.8 KB | 45.5 KB |
+  | ref_c | 8.74 ms | 10.63 ms | 12.0 KB | 40.9 KB |
+  | mafc one core, plain int8 loop | 4.97 ms | | | |
+  | **mafc one core, dense** | **3.73 ms (3.90x)** | 7.97 ms | 13.0 KB | 44.9 KB |
+  | mafc one core, code (in SRAM) | 3.82 ms | **3.85 ms (4.87x)** | 225 KB | 1.2 KB |
+  | mafc one core, dense streamed (`--stream`) | | 4.95 ms (3.79x) | 23.7 KB | 1.6 KB + 37 KB streamed |
+  | **mafc two cores, dense** | **2.12 ms (6.86x)** | 7.11 ms | 14.5 KB | 47.9 KB |
+  | mafc two cores, code (in SRAM) | 2.13 ms | 2.44 ms | 222 KB | 1.35 KB |
+
+- **Reading:**
+  - On int8 linear layers mafc is now level with CMSIS-NN: fc2 16.5k against 16.4k, fc1 7% behind (75.9k against 70.9k). The whole-model lead still comes from the conv stack (conv1 + dw1: 0.40M cycles against CMSIS-NN's 1.89M), which is the same as in tern80.
+  - **Weights as code stop paying from SRAM.** Only 5% of int8 weights are zero and grouping by magnitude still leaves about one multiply per weight, so code is slower than dense (85k against 76k for fc1) and takes about 170 KB of SRAM.
+  - In flash builds, dense layers thrash the 16 KB cache (45 KB read per inference, 7.97 ms). Code in SRAM is fastest (3.85 ms) but needs 225 KB of SRAM; streaming the dense layers (F23) gets 4.95 ms with 24 KB.
+- **Side effect on tern80:** the 4-row kernel also speeds up the ternary and int4 dense formats.
+  - fc1 dense: 103k → 76k cycles.
+  - fc2 dense (int4): 22.6k → 16.5k. That is now faster than fc2 as code (17.4k, F18) and level with CMSIS-NN (16.6k).
+  - Whole model, one core, SRAM: fc1 as code with fc2/fc3 dense is 3.56 ms, equal to the hybrid with everything as code (3.56 ms), and its binary is 24 KB smaller (136.8 against 160.8 KB).
+- **Meaning:** the right format depends on the weight type. Ternary: code (zeros become speed, F16). int4: dense or code (a tie). int8: dense in SRAM; in flash builds, code in SRAM if there is room, otherwise streamed. mafc's general advantage on int8 layers is small; its large wins are the conv kernels (F5) and weights with many zeros (F17).
+
 ## Gate 1
 
 **Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images), mafc is faster than CMSIS-NN in every like-for-like setup:
@@ -404,22 +444,22 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 Scope (F5, F17):
 - The MNIST margin is inflated by CMSIS-NN's weak kernels for one-input-channel and depthwise convs.
 - On a wide conv, the general win from compiling ternary weights into code is 1.2x (33% zeros) to 9x (90% zeros), and it loses at 0% zeros.
-- For int4 layers mafc is only level with CMSIS-NN (fc2 as code, F18), and int8 layers are untested.
+- For int4 and int8 layers mafc is only level with CMSIS-NN (F18, F24). On an all-int8 version of the model it is still 3.90x faster on one core (6.86x on two), all of it from the conv stack (F24).
 - Energy (step 2b) is not measured yet.
 
 ## Open questions and next experiments
 
 | Question | How to test | Status |
 |---|---|---|
-| Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b) | Waiting for cable |
+| Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b). Tooling ready: firmware command `L`, `harness/energy.py`, `measure.sh energy` | Waiting for cable |
 | Bytes actually read from flash per inference | F22: measured with the XIP counters for every flash build (`flash_read_kb`): hybrid 1.2 KB, CMSIS-NN 45.5 KB | Done |
 | Idea C: DMA streaming of weights | F21: the stream FIFO with double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. F23: in the compiler (`--stream`), the 30 KB fc1 runs 29% faster on one core and 58% faster than two cores sharing the cache | Done |
 | How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |
 | Where does the remaining time go? (two cores, all linear as code) | Join wait fixed (F19). Now conv1 42%, dw1 31%, pool1 8%, fc1 9%: the conv stack is about 85%. Candidates: fuse pool1 into dw1, conv1 channel pairs | Open |
 | Idea A: code vs data vs hybrid | F20: keep the hybrid (linear layers as code, conv weights as data) | Done |
-| Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Wide-conv microbenchmark (F17): yes for ternary weights with ≥ ~14% zeros (1.19x at 33%, 1.65x at 50%, 9x at 90%); no for dense ternary (0.86x). Still open: a whole wide model, and int8 layers | Answered for one layer |
-| Make int4/int8 layers competitive (fc2/fc3 were 3.6x slower than CMSIS-NN) | F18: fc2 as code is level with CMSIS-NN (17.4k vs 16.6k cycles); dense SMLAD 22.6k. int8 untested | int4 done |
+| Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Wide-conv microbenchmark (F17): yes for ternary weights with ≥ ~14% zeros (1.19x at 33%, 1.65x at 50%, 9x at 90%); no for dense ternary (0.86x). F24: int8 layers are level with CMSIS-NN (no zeros to exploit). Still open: a whole wide model | Answered for one layer |
+| Make int4/int8 layers competitive (fc2/fc3 were 3.6x slower than CMSIS-NN) | F18: fc2 as code is level with CMSIS-NN (17.4k vs 16.6k cycles). F24: the 4-row dense kernel is level too (int4 fc2 16.5k; int8 fc2 16.5k vs 16.4k, int8 fc1 75.9k vs 70.9k) | Done (level, not ahead) |
 | Is the second core's flash penalty about cache thrashing or bandwidth? | Contention measured (F12): moderate on convs, strong on fc1. With fc1 as code in SRAM (F16), the flash build is 2.89 ms against 2.32 ms all-SRAM. The remaining 25% is the convs and fc2 from flash. F22: thrashing contributes; with two cores the all-data build misses 32% more (13.1 vs 9.9 KB per inference) | Answered |
 
 ## Caveats

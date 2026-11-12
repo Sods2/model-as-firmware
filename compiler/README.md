@@ -81,9 +81,15 @@ Numbers: FINDINGS F16.
 
 Numbers: FINDINGS F18.
 
+## int8 layers (`--int8`)
+
+`--int8 {plain,dense,code}` sets the format of int8 linear layers (BitNetMCU `8bit`, e.g. the `int8_80` model): `plain` is a multiply loop over an int8 array, `dense` is the `SXTB16`/`SMLAD` kernel (needs `--simd`), `code` compiles the weights into instructions, grouped by magnitude. File suffix `_i8<fmt>`, CMake `-DINT8=`, `measure.sh` 8th field. Use `dense`: with almost no zero weights, code is slower and about 170 KB larger (FINDINGS F24).
+
+All dense layers (ternary, int4 or int8) compute 4 rows at a time, sharing each activation load (`dense_rows()`, `DENSE_ROW_BLOCK`).
+
 ## Streamed layers (`--stream`)
 
-`--stream` makes linear layers in a dense format (`--ternary dense` / `--int4 dense`) stream their weights from flash in flash builds. The XIP stream FIFO feeds a DMA channel into a double buffer of 8-row blocks while the CPU computes, and the function runs from SRAM on core 0. In copy_to_ram builds the layer reads its weights directly. File suffix `_stream`, CMake `-DSTREAM=ON`, `measure.sh` 7th field `stream`. This is the placement for weights too big for SRAM; for MNIST, code in SRAM is faster (FINDINGS F23).
+`--stream` makes linear layers in a dense format (`--ternary dense` / `--int4 dense` / `--int8 dense`) stream their weights from flash in flash builds. The XIP stream FIFO feeds a DMA channel into a double buffer of 8-row blocks while the CPU computes, and the function runs from SRAM on core 0. In copy_to_ram builds the layer reads its weights directly. File suffix `_stream`, CMake `-DSTREAM=ON`, `measure.sh` 7th field `stream`. This is the placement for weights too big for SRAM; for MNIST, code in SRAM is faster (FINDINGS F23).
 
 ## Conv weights as code (`--conv code`)
 

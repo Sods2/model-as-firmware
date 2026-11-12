@@ -51,7 +51,8 @@ static int16_t fc3_a16[64] __attribute__((aligned(4)));   // fc3 input widened t
 #define SMLATB(a, b, acc) __smlatb((int32_t)(a), (int32_t)(b), (acc))
 #define USAT(x, bits)     __usat((x), (bits))
 #define SXTB16(x)         __sxtb16(x)
-#define SXTB16_ROR8(x)    __sxtb16(__ror((x), 8))
+// gcc doesn't fold __ror into sxtb16 (one extra instruction), so the rotated form is written directly
+static inline uint32_t SXTB16_ROR8(uint32_t x) { uint32_t r; __asm__("sxtb16 %0, %1, ror #8" : "=r"(r) : "r"(x)); return r; }
 #else
 static inline uint32_t SXTB16(uint32_t x) {
     return ((uint32_t)(uint16_t)(int16_t)(int8_t)x) | ((uint32_t)(uint16_t)(int16_t)(int8_t)(x >> 16) << 16);
@@ -2225,25 +2226,59 @@ static inline void norm1(const int32_t *restrict in, int8_t *restrict out) {
     }
 }
 
-// fc2: linear 96 -> 64, int4sym as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input
+// fc2: linear 96 -> 64, int4sym as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input, 2 rows at a time
 static inline void fc2_widen(const int8_t *restrict in) {
     for (int i = 0; i < 96; i++) fc2_a16[i] = in[i];
 }
-static inline void fc2(const int8_t *restrict in, int32_t *restrict out) {
-    (void)in;
-    const uint32_t *w = fc2_w + 0 * 24;
-    for (int o = 0; o < 64; o++) {
+// fc2_rows: n rows of weights starting at w. 4 rows at a time: each activation pair is loaded once and
+// feeds all 4 rows (CMSIS-NN's vec_mat_mult does the same with 2 rows; our activations are already int16).
+__attribute__((always_inline)) static inline void fc2_rows(const uint32_t *restrict w, int32_t *restrict out, int n) {
+    int o = 0;
+    for (; o + 3 < n; o += 4) {
         const int16_t *a = fc2_a16;
-        int32_t s = 0;
+        int32_t s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+        #pragma GCC unroll 1
         for (int j = 0; j < 24; j++) {
-            uint32_t ww = *w++, a01, a23;
+            uint32_t a01, a23;
             memcpy(&a01, a + 4 * j, 4);
             memcpy(&a23, a + 4 * j + 2, 4);
-            s = SMLAD(SXTB16(ww), a01, s);
-            s = SMLAD(SXTB16_ROR8(ww), a23, s);
+            { uint32_t x = w[0 + j];
+              s0 = SMLAD(SXTB16(x), a01, s0);
+              s0 = SMLAD(SXTB16_ROR8(x), a23, s0); }
+            { uint32_t x = w[24 + j];
+              s1 = SMLAD(SXTB16(x), a01, s1);
+              s1 = SMLAD(SXTB16_ROR8(x), a23, s1); }
+            { uint32_t x = w[48 + j];
+              s2 = SMLAD(SXTB16(x), a01, s2);
+              s2 = SMLAD(SXTB16_ROR8(x), a23, s2); }
+            { uint32_t x = w[72 + j];
+              s3 = SMLAD(SXTB16(x), a01, s3);
+              s3 = SMLAD(SXTB16_ROR8(x), a23, s3); }
         }
-        out[o] = s;
+        out[o + 0] = s0;
+        out[o + 1] = s1;
+        out[o + 2] = s2;
+        out[o + 3] = s3;
+        w += 4 * 24;
     }
+    const int left = (n - o) & 3;                           // leftover rows (< 4), one at a time
+    for (int r = 0; r < left; r++, o++) {
+        const int16_t *a = fc2_a16;
+        int32_t s0 = 0;
+        for (int j = 0; j < 24; j++) {
+            uint32_t x = w[j], a01, a23;
+            memcpy(&a01, a + 4 * j, 4);
+            memcpy(&a23, a + 4 * j + 2, 4);
+            s0 = SMLAD(SXTB16(x), a01, s0);
+            s0 = SMLAD(SXTB16_ROR8(x), a23, s0);
+        }
+        out[o] = s0;
+        w += 24;
+    }
+}
+static inline void fc2(const int8_t *restrict in, int32_t *restrict out) {
+    (void)in;
+    fc2_rows(fc2_w + 0 * 24, out + 0, 64 - 0);
 }
 
 // norm2: ReLU + dynamic power-of-two requantization to 0..127, 64 values
@@ -2261,25 +2296,59 @@ static inline void norm2(const int32_t *restrict in, int8_t *restrict out) {
     }
 }
 
-// fc3: linear 64 -> 10, int4sym as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input
+// fc3: linear 64 -> 10, int4sym as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input, 2 rows at a time
 static inline void fc3_widen(const int8_t *restrict in) {
     for (int i = 0; i < 64; i++) fc3_a16[i] = in[i];
 }
-static inline void fc3(const int8_t *restrict in, int32_t *restrict out) {
-    (void)in;
-    const uint32_t *w = fc3_w + 0 * 16;
-    for (int o = 0; o < 10; o++) {
+// fc3_rows: n rows of weights starting at w. 4 rows at a time: each activation pair is loaded once and
+// feeds all 4 rows (CMSIS-NN's vec_mat_mult does the same with 2 rows; our activations are already int16).
+__attribute__((always_inline)) static inline void fc3_rows(const uint32_t *restrict w, int32_t *restrict out, int n) {
+    int o = 0;
+    for (; o + 3 < n; o += 4) {
         const int16_t *a = fc3_a16;
-        int32_t s = 0;
+        int32_t s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+        #pragma GCC unroll 1
         for (int j = 0; j < 16; j++) {
-            uint32_t ww = *w++, a01, a23;
+            uint32_t a01, a23;
             memcpy(&a01, a + 4 * j, 4);
             memcpy(&a23, a + 4 * j + 2, 4);
-            s = SMLAD(SXTB16(ww), a01, s);
-            s = SMLAD(SXTB16_ROR8(ww), a23, s);
+            { uint32_t x = w[0 + j];
+              s0 = SMLAD(SXTB16(x), a01, s0);
+              s0 = SMLAD(SXTB16_ROR8(x), a23, s0); }
+            { uint32_t x = w[16 + j];
+              s1 = SMLAD(SXTB16(x), a01, s1);
+              s1 = SMLAD(SXTB16_ROR8(x), a23, s1); }
+            { uint32_t x = w[32 + j];
+              s2 = SMLAD(SXTB16(x), a01, s2);
+              s2 = SMLAD(SXTB16_ROR8(x), a23, s2); }
+            { uint32_t x = w[48 + j];
+              s3 = SMLAD(SXTB16(x), a01, s3);
+              s3 = SMLAD(SXTB16_ROR8(x), a23, s3); }
         }
-        out[o] = s;
+        out[o + 0] = s0;
+        out[o + 1] = s1;
+        out[o + 2] = s2;
+        out[o + 3] = s3;
+        w += 4 * 16;
     }
+    const int left = (n - o) & 3;                           // leftover rows (< 4), one at a time
+    for (int r = 0; r < left; r++, o++) {
+        const int16_t *a = fc3_a16;
+        int32_t s0 = 0;
+        for (int j = 0; j < 16; j++) {
+            uint32_t x = w[j], a01, a23;
+            memcpy(&a01, a + 4 * j, 4);
+            memcpy(&a23, a + 4 * j + 2, 4);
+            s0 = SMLAD(SXTB16(x), a01, s0);
+            s0 = SMLAD(SXTB16_ROR8(x), a23, s0);
+        }
+        out[o] = s0;
+        w += 16;
+    }
+}
+static inline void fc3(const int8_t *restrict in, int32_t *restrict out) {
+    (void)in;
+    fc3_rows(fc3_w + 0 * 16, out + 0, 10 - 0);
 }
 
 uint32_t ref_infer(const int8_t img[REF_IMG_PIXELS], int32_t logits[REF_N_CLASSES]) {

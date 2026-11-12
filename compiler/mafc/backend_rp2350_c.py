@@ -224,7 +224,8 @@ SIMD_HELPERS = '''
 #define SMLATB(a, b, acc) __smlatb((int32_t)(a), (int32_t)(b), (acc))
 #define USAT(x, bits)     __usat((x), (bits))
 #define SXTB16(x)         __sxtb16(x)
-#define SXTB16_ROR8(x)    __sxtb16(__ror((x), 8))
+// gcc doesn't fold __ror into sxtb16 (one extra instruction), so the rotated form is written directly
+static inline uint32_t SXTB16_ROR8(uint32_t x) { uint32_t r; __asm__("sxtb16 %0, %1, ror #8" : "=r"(r) : "r"(x)); return r; }
 #else
 static inline uint32_t SXTB16(uint32_t x) {
     return ((uint32_t)(uint16_t)(int16_t)(int8_t)x) | ((uint32_t)(uint16_t)(int16_t)(int8_t)(x >> 16) << 16);
@@ -362,11 +363,58 @@ PAR_MIN_MACS = 4096   # linear layers smaller than this stay on core 0 (the hand
 
 TERNARY_FORMATS = ('base3', 'sparse', 'code', 'dense')
 INT4_FORMATS = ('packed', 'code', 'dense')
+INT8_FORMATS = ('plain', 'code', 'dense')   # plain = emit_linear's int8 loop
 STREAM_BLOCK_ROWS = 8   # rows per streamed weight block (double-buffered)
 
 
+DENSE_ROW_BLOCK = 4   # dense format: rows computed together, sharing each activation load (FINDINGS F24)
+
+
+def dense_rows(nm, k, R=DENSE_ROW_BLOCK):
+    """C text of {nm}_rows(w, out, n): n rows of a dense layer (k words of 4 int8 weights per row), R rows at a
+    time so each pair of int16 activations is loaded once per R rows; then the leftover rows one at a time."""
+    assert R >= 1 and R & (R - 1) == 0, 'row block must be a power of two'
+    acc = ', '.join(f's{r} = 0' for r in range(R))
+    body = ''.join(f'''            {{ uint32_t x = w[{r * k} + j];
+              s{r} = SMLAD(SXTB16(x), a01, s{r});
+              s{r} = SMLAD(SXTB16_ROR8(x), a23, s{r}); }}
+''' for r in range(R))
+    stores = ''.join(f'        out[o + {r}] = s{r};\n' for r in range(R))
+    return f'''// {nm}_rows: n rows of weights starting at w. {R} rows at a time: each activation pair is loaded once and
+// feeds all {R} rows (CMSIS-NN's vec_mat_mult does the same with 2 rows; our activations are already int16).
+__attribute__((always_inline)) static inline void {nm}_rows(const uint32_t *restrict w, int32_t *restrict out, int n) {{
+    int o = 0;
+    for (; o + {R - 1} < n; o += {R}) {{
+        const int16_t *a = {nm}_a16;
+        int32_t {acc};
+        #pragma GCC unroll 1
+        for (int j = 0; j < {k}; j++) {{
+            uint32_t a01, a23;
+            memcpy(&a01, a + 4 * j, 4);
+            memcpy(&a23, a + 4 * j + 2, 4);
+{body}        }}
+{stores}        w += {R} * {k};
+    }}
+    const int left = (n - o) & {R - 1};                           // leftover rows (< {R}), one at a time
+    for (int r = 0; r < left; r++, o++) {{
+        const int16_t *a = {nm}_a16;
+        int32_t s0 = 0;
+        for (int j = 0; j < {k}; j++) {{
+            uint32_t x = w[j], a01, a23;
+            memcpy(&a01, a + 4 * j, 4);
+            memcpy(&a23, a + 4 * j + 2, 4);
+            s0 = SMLAD(SXTB16(x), a01, s0);
+            s0 = SMLAD(SXTB16_ROR8(x), a23, s0);
+        }}
+        out[o] = s0;
+        w += {k};
+    }}
+}}
+'''
+
+
 def emit_linear_fmt(node, fmt, rows, stream=False):
-    """A ternary or int4sym linear layer in one of the alternative formats (base3 / packed are emit_linear). Returns
+    """A ternary, int4sym or int8 linear layer in one of the alternative formats (base3 / packed / plain are emit_linear). Returns
     (weights C text, function C text, C statement to run before the call or None, extra globals C text).
     Every function takes (in, out, o0, o1) when rows is True, else (in, out).
       sparse: per row, the input indices of the +1 weights then the -1 weights (uint16), summed with a loop.
@@ -374,7 +422,7 @@ def emit_linear_fmt(node, fmt, rows, stream=False):
               the inputs are summed per weight magnitude first and each group is multiplied once:
               3 * (in[2] - in[9] ...) + 5 * (...) + ...  (one add/sub per weight, at most 8 multiplies per row).
       dense:  the weights as int8, 4 per word, unpacked with SXTB16 and multiplied with SMLAD against an int16
-              copy of the input (widened once, before the call). Ternary or int4sym.
+              copy of the input (widened once, before the call). Ternary, int4sym or int8.
               stream=True: the weights are streamed from flash in blocks by DMA (idea C, --stream).
     sparse is ternary only."""
     w = node.weights
@@ -385,7 +433,7 @@ def emit_linear_fmt(node, fmt, rows, stream=False):
     lo, hi = ('o0', 'o1') if rows else ('0', str(n_out))
     nnz = int(np.count_nonzero(w))
     q = node.attrs['quant']
-    assert q in ('ternary', 'int4sym') and (fmt != 'sparse' or q == 'ternary')
+    assert q in ('ternary', 'int4sym', 'int8') and (fmt != 'sparse' or q == 'ternary')
     if fmt == 'sparse':
         idx, start, mid = [], [], []
         for o in range(n_out):
@@ -486,21 +534,7 @@ __attribute__((noinline)) static void MAFC_IN_SRAM({nm}){sig} {{
 static inline void {nm}_widen(const int8_t *restrict in) {{
     for (int i = 0; i < {n_in}; i++) {nm}_a16[i] = in[i];
 }}
-__attribute__((always_inline)) static inline void {nm}_rows(const uint32_t *restrict w, int32_t *restrict out, int n) {{
-    for (int o = 0; o < n; o++) {{
-        const int16_t *a = {nm}_a16;
-        int32_t s = 0;
-        for (int j = 0; j < {k}; j++) {{
-            uint32_t ww = *w++, a01, a23;
-            memcpy(&a01, a + 4 * j, 4);
-            memcpy(&a23, a + 4 * j + 2, 4);
-            s = SMLAD(SXTB16(ww), a01, s);
-            s = SMLAD(SXTB16_ROR8(ww), a23, s);
-        }}
-        out[o] = s;
-    }}
-}}
-__attribute__((noinline)) static void MAFC_IN_SRAM({nm})(const int8_t *restrict in, int32_t *restrict out) {{
+''' + dense_rows(nm, k) + f'''__attribute__((noinline)) static void MAFC_IN_SRAM({nm})(const int8_t *restrict in, int32_t *restrict out) {{
     (void)in;
 #if defined(PICO_ON_DEVICE) && PICO_ON_DEVICE
     const uintptr_t wa = (uintptr_t){nm}_w;
@@ -540,25 +574,13 @@ __attribute__((noinline)) static void MAFC_IN_SRAM({nm})(const int8_t *restrict 
 }}
 '''
             return data, fn, f'{nm}_widen', glob
-        fn = f'''// {nm}: linear {n_in} -> {n_out}, {q} as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input
+        fn = f'''// {nm}: linear {n_in} -> {n_out}, {q} as int8, 4 per word (bytes w0 w2 w1 w3); SXTB16 + SMLAD on the int16 input, 2 rows at a time
 static inline void {nm}_widen(const int8_t *restrict in) {{
     for (int i = 0; i < {n_in}; i++) {nm}_a16[i] = in[i];
 }}
-static inline void {nm}{sig} {{
+''' + dense_rows(nm, k) + f'''static inline void {nm}{sig} {{
     (void)in;
-    const uint32_t *w = {nm}_w + {lo} * {k};
-    for (int o = {lo}; o < {hi}; o++) {{
-        const int16_t *a = {nm}_a16;
-        int32_t s = 0;
-        for (int j = 0; j < {k}; j++) {{
-            uint32_t ww = *w++, a01, a23;
-            memcpy(&a01, a + 4 * j, 4);
-            memcpy(&a23, a + 4 * j + 2, 4);
-            s = SMLAD(SXTB16(ww), a01, s);
-            s = SMLAD(SXTB16_ROR8(ww), a23, s);
-        }}
-        out[o] = s;
-    }}
+    {nm}_rows({nm}_w + {lo} * {k}, out + {lo}, {hi} - {lo});
 }}
 '''
         return data, fn, f'{nm}_widen', glob
@@ -568,7 +590,8 @@ static inline void {nm}{sig} {{
 CONV_FORMATS = ('data', 'code')
 
 
-def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False):
+def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False,
+             int8='plain'):
     """cores=2: the channel-fused conv segment and the big linear layers are split across both M33 cores.
     Core 1 runs a job loop fed by the SIO FIFO; on the PC build the core-1 jobs simply run inline first."""
     assert cores in (1, 2)
@@ -592,8 +615,8 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
     streamed = set()
     if stream:
         streamed = {nd.name for nd in rest if nd.op == 'linear' and
-                    {'ternary': ternary, 'int4sym': int4}.get(nd.attrs['quant']) == 'dense'}
-        assert streamed, '--stream needs a dense-format layer (--ternary dense or --int4 dense)'
+                    {'ternary': ternary, 'int4sym': int4, 'int8': int8}.get(nd.attrs['quant']) == 'dense'}
+        assert streamed, '--stream needs a dense-format layer (--ternary/--int4/--int8 dense)'
         par_linear -= streamed
     stage_names = [nodes[i].name for i in seg] + (['join'] if cores == 2 else []) + \
                   [nd.name for nd in rest if nd.op == 'linear']
@@ -644,16 +667,18 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
                              emit_conv_ch(nd, 'int8_t' if nd.attrs['mode'] == 'broadcast' else 'int32_t'))
         else:
             funcs.append(emit_pool_ch(nd, it, ot) if simd else emit_pool_ch(nd))
-    assert ternary in TERNARY_FORMATS and int4 in INT4_FORMATS and conv in CONV_FORMATS
+    assert ternary in TERNARY_FORMATS and int4 in INT4_FORMATS and int8 in INT8_FORMATS and conv in CONV_FORMATS
     assert conv == 'data' or simd, '--conv code specialises the SMLAD conv kernels: needs --simd'
-    assert (ternary != 'dense' and int4 != 'dense') or simd, 'the dense formats use SXTB16/SMLAD: need --simd'
+    assert (ternary != 'dense' and int4 != 'dense' and int8 != 'dense') or simd, \
+        'the dense formats use SXTB16/SMLAD: need --simd'
     pre_call, extra_globals = {}, ''
     for nd in rest:
         if nd.op == 'relu_norm':
             funcs.append(emit_relu_norm(nd))
         elif nd.op == 'linear':
             fmt = {'ternary': ternary if ternary != 'base3' else None,
-                   'int4sym': int4 if int4 != 'packed' else None}.get(nd.attrs['quant'])
+                   'int4sym': int4 if int4 != 'packed' else None,
+                   'int8': int8 if int8 != 'plain' else None}.get(nd.attrs['quant'])
             if fmt:
                 d, f, pre, glob = emit_linear_fmt(nd, fmt, rows=nd.name in par_linear, stream=nd.name in streamed)
                 if pre:
@@ -778,10 +803,10 @@ static inline void join_job(void) {{}}
     ]
 
     variant = ('v0 (one core' if cores == 1 else 'v1 (two cores') + (', SMLAD on int16 planes' if simd else '') + \
-              (f', ternary as {ternary}' if ternary != 'base3' else '') + (f', int4 as {int4}' if int4 != 'packed' else '') + (', conv weights as code' if conv == 'code' else '') + (', dense layers streamed from flash' if stream else '')
+              (f', ternary as {ternary}' if ternary != 'base3' else '') + (f', int4 as {int4}' if int4 != 'packed' else '') + (', conv weights as code' if conv == 'code' else '') + (', dense layers streamed from flash' if stream else '') + (f', int8 layers {int8}' if int8 != 'plain' else '')
     names = ', '.join(f'"{n}"' for n in stage_names)
     regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '') + (' --simd' if simd else '') + \
-            (f' --ternary {ternary}' if ternary != 'base3' else '') + (f' --int4 {int4}' if int4 != 'packed' else '') + (' --conv code' if conv == 'code' else '') + (' --stream' if stream else '')
+            (f' --ternary {ternary}' if ternary != 'base3' else '') + (f' --int4 {int4}' if int4 != 'packed' else '') + (' --conv code' if conv == 'code' else '') + (' --stream' if stream else '') + (f' --int8 {int8}' if int8 != 'plain' else '')
     desc = '\n'.join('//   ' + l for l in graph.describe().splitlines())
     head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c {variant}, all weights as packed data).
 // Source: {source}
@@ -826,12 +851,14 @@ static int8_t act[{tail_max}];
             '\n'.join(body) + '\n}\n')
 
 
-def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False):
+def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False,
+          int8='plain'):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     c_path = out_dir / (f'mafc_{graph.name}' + ('_dual' if cores == 2 else '') + ('_simd' if simd else '') +
                         (f'_{ternary}' if ternary != 'base3' else '') + (f'_i4{int4}' if int4 != 'packed' else '') +
+                        (f'_i8{int8}' if int8 != 'plain' else '') +
                         ('_cvcode' if conv == 'code' else '') + ('_stream' if stream else '') + '.c')
-    c_path.write_text(generate(graph, source, cores, simd, ternary, int4, conv, stream), encoding='utf-8', newline='\n')
+    c_path.write_text(generate(graph, source, cores, simd, ternary, int4, conv, stream, int8), encoding='utf-8', newline='\n')
     (out_dir / f'mafc_{graph.name}.ir.json').write_text(graph.to_json(), encoding='utf-8', newline='\n')
     return c_path

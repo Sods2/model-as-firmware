@@ -18,7 +18,7 @@
 | `pytorch_agree_pct` | % of images where the prediction equals the PyTorch model's |
 | `latency_ms_mean`, `cycles_*` | `ref_infer()` only, DWT cycle counter at `sys_mhz` |
 | `flash_kb`, `ram_kb` | From `arm-none-eabi-size`: flash = text + data, RAM = data + bss (+ text for `_ram` builds). Stack and heap not included |
-| `flash_read_kb`, `energy_mj` | Not measured yet. Energy needs the power meter cable; flash reads have no simple counter on the RP2350 (see notes/pico-toolchain.md) |
+| `flash_read_kb`, `energy_mj` | `flash_read_kb`: filled from 12 Nov 2026 (XIP counters, see below). `energy_mj`: not measured yet; energy runs go to their own file, `energy.csv` (`harness/energy.py`), once the power meter cable arrives |
 
 ## Phase 0 summary (11 Nov 2026)
 
@@ -167,6 +167,23 @@ From 12 Nov 2026, `flash_read_kb` is filled for board runs: XIP cache misses × 
 | mafc_v1_dual_simd_code_i4code (SRAM build) | 1.99 ms | 0 | (no XIP accesses) |
 
 Note: the ref_c and cmsis_nn rows of this run are in `phase1.csv` (their earlier rows are in `phase0.csv`).
+
+### int8 model (`notes` = `int8 model (all linear layers int8)`)
+
+The `int8_80` model: the tern80 CNN with all linear layers int8 (FINDINGS F24). 10k images, all bit-exact. Accuracy 99.45% for ref_c and every mafc build, 99.43% for CMSIS-NN.
+
+| Build | Latency | Flash read / inference |
+|---|---|---|
+| ref_c / ref_c_ram | 10.63 / 8.74 ms | 40.9 KB / 0 |
+| cmsis_nn / cmsis_nn_ram | 18.74 / 14.54 ms | 45.5 KB / 0 |
+| mafc_v0_simd_ram (plain int8 loop) | 4.97 ms | 0 |
+| mafc_v0_simd_i8dense / _ram | 7.97 / **3.73 ms** | 44.9 KB / 0 |
+| mafc_v0_simd_i8code / _ram | **3.85** / 3.82 ms | 1.2 KB / 0 |
+| mafc_v0_simd_i8dense_stream | 4.95 ms | 1.6 KB (+37 KB streamed) |
+| mafc_v1_dual_simd_i8dense / _ram | 7.11 / **2.12 ms** | 47.9 KB / 0 |
+| mafc_v1_dual_simd_i8code / _ram | 2.44 / 2.13 ms | 1.35 KB / 0 |
+
+Rows with `notes` = `dense kernel: 4 rows, sxtb16 ror folded` re-measure tern80 dense builds with the new kernel: `mafc_v0_simd_dense_ram` 4.03 ms, `mafc_v0_simd_code_i4dense_ram` 3.56 ms, `mafc_v1_dual_simd_dense_stream` 3.99 ms.
 
 ### Streamed fc1 (`notes` = `idea C in the compiler: fc1 dense, streamed vs XIP`)
 

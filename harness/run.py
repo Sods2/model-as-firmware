@@ -30,7 +30,8 @@ BITNET = ROOT / 'train' / 'BitNetMCU'
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from golden import Golden, GoldenS8  # noqa: E402
 
-CONFIGS = {'tern80': 'ternary_cnn80.yaml', 'tern80z70': 'ternary_cnn80_z70.yaml', 'tern80z90': 'ternary_cnn80_z90.yaml'}
+CONFIGS = {'tern80': 'ternary_cnn80.yaml', 'tern80z70': 'ternary_cnn80_z70.yaml', 'tern80z90': 'ternary_cnn80_z90.yaml',
+           'int8_80': 'int8_cnn80.yaml'}
 SIZE_TOOL = Path.home() / '.pico-sdk/toolchain/15_2_Rel1/bin/arm-none-eabi-size.exe'
 SUMMARY_COLS = ['date', 'build', 'model', 'target', 'n_images', 'accuracy_pct', 'golden_match_pct',
                 'pytorch_agree_pct', 'latency_ms_mean', 'cycles_mean', 'cycles_min', 'cycles_max', 'sys_mhz',

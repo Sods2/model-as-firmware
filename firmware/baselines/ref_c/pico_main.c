@@ -6,6 +6,9 @@
 //   'T'               -> "T <stage>=<cycles> ..." for the last image
 //   'X'               -> "X <images> <xip_accesses> <xip_hits>": XIP cache counters summed over all images since
 //                        boot (RP2350), counted around ref_infer() only. Misses x 8-byte lines ~ bytes read from flash.
+//   'L' + 2 bytes     -> "L <inferences> <microseconds>": runs ref_infer() back to back on the last image for the
+//                        given number of seconds (little-endian uint16), for energy measurement (harness/energy.py).
+//                        No USB traffic during the loop; the LED stays on.
 // Cycles come from the DWT cycle counter and cover ref_infer() only.
 #include <stdio.h>
 #include <stdint.h>
@@ -75,6 +78,18 @@ int main(void) {
             for (int i = 0; i < REF_N_CLASSES; i++) printf(" %ld", (long)logits[i]);
             printf("\n");
             gpio_put(PICO_DEFAULT_LED_PIN, (++n >> 6) & 1);  // slow blink while busy
+        } else if (cmd == 'L') {
+            uint32_t secs = (uint32_t)read_byte();
+            secs |= (uint32_t)read_byte() << 8;
+            gpio_put(PICO_DEFAULT_LED_PIN, 1);
+            const uint64_t t0 = time_us_64(), t_end = t0 + (uint64_t)secs * 1000000u;
+            uint32_t count = 0;
+            uint64_t t;
+            do {
+                (void)ref_infer(img, logits);
+                count++;
+            } while ((t = time_us_64()) < t_end);
+            printf("L %lu %llu\n", (unsigned long)count, (unsigned long long)(t - t0));
         } else if (cmd == 'X') {
             printf("X %lu %llu %llu\n", (unsigned long)n, (unsigned long long)x_acc, (unsigned long long)x_hit);
         } else if (cmd == 'T') {

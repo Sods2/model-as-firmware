@@ -27,11 +27,10 @@ const char ref_model_name[] = MODEL_HEADER;
 #if L4_groups != L4_in_channels || L7_groups != L7_in_channels
 #error "L4 and L7 must be depthwise"
 #endif
-#if L11_bitperweight != 64
-#error "fc1 (L11) must be ternary (10 trits per uint16)"
-#endif
-#if L13_bitperweight != 4 || L15_bitperweight != 4
-#error "fc2/fc3 (L13/L15) must be 4bitsym"
+// fc layers: 64 = ternary (10 trits per uint16), 4 = 4bitsym (8 per uint32), 16 = 8bit (4 per uint32)
+#define FC_BPW_OK(b) ((b) == 64 || (b) == 4 || (b) == 16)
+#if !FC_BPW_OK(L11_bitperweight) || !FC_BPW_OK(L13_bitperweight) || !FC_BPW_OK(L15_bitperweight)
+#error "fc layers (L11/L13/L15) must be ternary, 4bitsym or 8bit"
 #endif
 #if L15_outgoing_weights != REF_N_CLASSES
 #error "classifier must have 10 outputs"
@@ -135,6 +134,29 @@ static void fc_4bitsym(const int8_t *in, const uint32_t *w, int n_in, int n_out,
     }
 }
 
+// 8bit fully connected layer. 4 bytes per uint32, most significant first, two's complement.
+static void fc_8bit(const int8_t *in, const uint32_t *w, int n_in, int n_out, int32_t *out) {
+    for (int o = 0; o < n_out; o++) {
+        const int8_t *a = in;
+        int32_t sum = 0;
+        for (int k = 0; k < n_in; k += 4) {
+            uint32_t word = *w++;
+            for (int j = 0; j < 4; j++) {
+                sum += (int32_t)(int8_t)(word >> 24) * *a++;
+                word <<= 8;
+            }
+        }
+        out[o] = sum;
+    }
+}
+
+// One fc layer in whatever format the header has (bpw is a compile-time constant, so the switch folds away).
+static inline void fc_any(int bpw, const void *w, const int8_t *in, int n_in, int n_out, int32_t *out) {
+    if (bpw == 64) fc_ternary(in, (const uint16_t *)w, n_in, n_out, out);
+    else if (bpw == 4) fc_4bitsym(in, (const uint32_t *)w, n_in, n_out, out);
+    else fc_8bit(in, (const uint32_t *)w, n_in, n_out, out);
+}
+
 const int ref_n_stages = 8;
 const char *const ref_stage_names[REF_MAX_STAGES] = {"conv1", "dw1", "pool1", "dw2", "pool2", "fc1", "fc2", "fc3"};
 uint32_t ref_stage_cycles[REF_MAX_STAGES];
@@ -163,15 +185,15 @@ uint32_t ref_infer(const int8_t img[REF_IMG_PIXELS], int32_t logits[REF_N_CLASSE
         PROF_STAGE(ST_POOL2);
     }
     relu_norm(feat, act, N_FEAT);
-    fc_ternary(act, L11_weights, L11_incoming_weights, L11_outgoing_weights, acc);
+    fc_any(L11_bitperweight, L11_weights, act, L11_incoming_weights, L11_outgoing_weights, acc);
     PROF_STAGE(ST_FC1);
 
     relu_norm(acc, act, L11_outgoing_weights);
-    fc_4bitsym(act, L13_weights, L13_incoming_weights, L13_outgoing_weights, acc);
+    fc_any(L13_bitperweight, L13_weights, act, L13_incoming_weights, L13_outgoing_weights, acc);
     PROF_STAGE(ST_FC2);
 
     relu_norm(acc, act, L13_outgoing_weights);
-    fc_4bitsym(act, L15_weights, L15_incoming_weights, L15_outgoing_weights, logits);
+    fc_any(L15_bitperweight, L15_weights, act, L15_incoming_weights, L15_outgoing_weights, logits);
     PROF_STAGE(ST_FC3);
 
     uint32_t best = 0;

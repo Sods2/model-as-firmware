@@ -226,6 +226,14 @@ Two-core SRAM profile now: conv1 127k (39%), dw1 94k (29%), pool1 23k (7%), dw2 
 
 fc1 dense from flash: 308k → 219k cycles (one core), and 526k → 219k against two cores sharing the cache. Whole model 6.29 → 5.12 ms (one core) and 6.65 → 3.97 ms (two cores). FINDINGS F23.
 
+### v1 step 9: int8 layers (`--int8`) and the 4-row dense kernel (12 Nov 2026)
+
+- The IR always allowed `quant: int8`, and `emit_linear` had a plain int8 loop. New: the front end reads BitNetMCU 8-bit layers (bitperweight 16), and `--int8 {plain,dense,code}` chooses the format. `dense` and `code` are the same emitters as for ternary/int4 (`emit_linear_fmt`), since neither depends on the weight values' range.
+- File suffix `_i8<fmt>`, CMake `-DINT8=`, `measure.sh` 8th field.
+- **`dense_rows()`** (all dense layers, any weight type): `DENSE_ROW_BLOCK = 4` rows computed together. Each pair of int16 activations is loaded once per 4 rows; leftover rows go one at a time (the leftover count is masked, `(n - o) & 3`, so gcc can bound the loop). Inner loop: 24 instructions per 16 MACs, no spills. 2 rows: slower (85k vs 76k for int8 fc1); 8 rows: spills (87k).
+- **`SXTB16_ROR8`** is now inline asm `sxtb16 %0, %1, ror #8`. With `__sxtb16(__ror(x, 8))` gcc always emitted a separate `mov ror`.
+- Results (FINDINGS F24): int8 fc1 111k → 76k cycles (CMSIS-NN 71k), fc2 22.6k → 16.5k (CMSIS-NN 16.4k); tern80 fc1 dense 103k → 76k, fc2 int4 dense 22.6k → 16.5k (now faster than fc2 as code). Code format for int8: 85k for fc1 and about 170 KB of code, so dense wins from SRAM.
+
 ## Lessons
 
 - The worst-case bound analysis belongs in the compiler: it decides data types (int16 vs int32) and proves no overflow. The current interpreter only *asserts* int32 safety at run time.
