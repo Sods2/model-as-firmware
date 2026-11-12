@@ -29,6 +29,9 @@ def main():
     ap.add_argument('--int4', default='packed', choices=backend_rp2350_c.INT4_FORMATS,
                     help='format of int4sym linear layers (fc2, fc3): packed (8 per uint32, decode loop), '
                          'code (weights compiled into instructions), dense (int8 + SXTB16/SMLAD, needs --simd)')
+    ap.add_argument('--int8', default='plain', choices=backend_rp2350_c.INT8_FORMATS,
+                    help='format of int8 linear layers: plain (int8 array, multiply loop), '
+                         'code (weights compiled into instructions), dense (SXTB16/SMLAD, needs --simd)')
     ap.add_argument('--conv', default='data', choices=backend_rp2350_c.CONV_FORMATS,
                     help='conv weights: data (packed words loaded per channel) or code (one specialised function '
                          'per channel, weights as immediates; needs --simd)')
@@ -49,7 +52,7 @@ def main():
         print(f'IR interpreter == golden on {args.check} images: {ok}')
         if not ok:
             sys.exit(1)
-    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd, ternary=args.ternary, int4=args.int4, conv=args.conv, stream=args.stream)
+    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd, ternary=args.ternary, int4=args.int4, conv=args.conv, stream=args.stream, int8=args.int8)
     print(f'wrote {path.relative_to(ROOT)}')
 
 

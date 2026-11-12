@@ -13,9 +13,7 @@ from .ir import Graph, Node
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'harness'))
-from golden import decode_4bitsym, decode_ternary, parse_header  # noqa: E402
-
-QUANT = {64: 'ternary', 4: 'int4sym'}
+from golden import QUANT_NAMES, decode_fc, parse_header  # noqa: E402
 
 
 def load(header):
@@ -27,9 +25,8 @@ def load(header):
     n = d['L2_incoming_x']
 
     def fc(layer):
-        bpw, n_in, n_out = d[f'{layer}_bitperweight'], d[f'{layer}_incoming_weights'], d[f'{layer}_outgoing_weights']
-        dec = {64: decode_ternary, 4: decode_4bitsym}[bpw]
-        return dec(a[f'{layer}_weights'], n_in, n_out), QUANT[bpw]
+        w, bpw = decode_fc(d, a, layer)
+        return w, QUANT_NAMES[bpw]
 
     w1, q1 = fc('L11')
     w2, q2 = fc('L13')

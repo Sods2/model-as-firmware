@@ -51,6 +51,28 @@ def decode_4bitsym(words, n_in, n_out):
     return w.reshape(n_out, n_in)
 
 
+def decode_8bit(words, n_in, n_out):
+    """uint32 words, 4 bytes each (MSB first, two's complement) -> [n_out, n_in] in -128..127."""
+    wd = (words & 0xFFFFFFFF).reshape(n_out, n_in // 4)
+    w = np.zeros((n_out, n_in // 4, 4), dtype=np.int64)
+    for j in range(4):
+        b = (wd >> (24 - 8 * j)) & 0xFF
+        w[:, :, j] = np.where(b & 0x80, b - 256, b)
+    return w.reshape(n_out, n_in)
+
+
+# BitNetMCU's <layer>_bitperweight codes -> decoder, for the linear layers this project supports
+DECODERS = {64: decode_ternary, 4: decode_4bitsym, 16: decode_8bit}
+QUANT_NAMES = {64: 'ternary', 4: 'int4sym', 16: 'int8'}
+
+
+def decode_fc(d, a, layer):
+    """Decode linear layer <layer> (e.g. 'L11') of a parsed header -> ([n_out, n_in] int64, bitperweight)."""
+    bpw = d[f'{layer}_bitperweight']
+    assert bpw in DECODERS, f'{layer}: unsupported bitperweight {bpw}'
+    return DECODERS[bpw](a[f'{layer}_weights'], d[f'{layer}_incoming_weights'], d[f'{layer}_outgoing_weights']), bpw
+
+
 def _trace(model, img):
     """Run one image through model._forward and keep every stage's output."""
     out = {}
@@ -67,14 +89,13 @@ class Golden:
         d, a = parse_header(header)
         self.name = Path(header).stem
         assert re.search(r'^#define\s+MODEL_CNNMNIST\b', Path(header).read_text(), re.M), 'CNNMNIST layout only'
-        assert d['L11_bitperweight'] == 64 and d['L13_bitperweight'] == 4 and d['L15_bitperweight'] == 4
         self.n_ch = d['L7_out_channels']
         self.k1 = a['L2_weights'].reshape(self.n_ch, 3, 3)
         self.k2 = a['L4_weights'].reshape(self.n_ch, 3, 3)
         self.k3 = a['L7_weights'].reshape(self.n_ch, 3, 3)
-        self.fc1 = decode_ternary(a['L11_weights'], d['L11_incoming_weights'], d['L11_outgoing_weights'])
-        self.fc2 = decode_4bitsym(a['L13_weights'], d['L13_incoming_weights'], d['L13_outgoing_weights'])
-        self.fc3 = decode_4bitsym(a['L15_weights'], d['L15_incoming_weights'], d['L15_outgoing_weights'])
+        self.fc1, _ = decode_fc(d, a, 'L11')     # ternary, 4bitsym or 8bit (DECODERS)
+        self.fc2, _ = decode_fc(d, a, 'L13')
+        self.fc3, _ = decode_fc(d, a, 'L15')
         self.max_abs_bound = 0  # largest possible |partial sum| seen, to prove int32 is safe
 
     def _bound(self, v):

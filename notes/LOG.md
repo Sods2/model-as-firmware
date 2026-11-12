@@ -2,6 +2,16 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 12 Nov 2026 (evening): energy tooling, int8 layers, 4-row dense kernel
+
+- **Energy tooling (step 2b, ready for the cable):** firmware command `L` + 2 bytes runs `ref_infer()` back to back for N seconds with no USB traffic; `harness/energy.py` walks through an idle and a busy phase and asks for the meter readings (mWh, mW or mA); `measure.sh energy` builds, flashes and runs it per build. Checked with `--no-meter`: 2,508 inferences in 5 s = 1.994 ms, the same as the final.
+- **int8 model:** `train/configs/int8_cnn80.yaml`, the tern80 CNN with all linear layers int8. 99.43% final (99.50% best, epoch 45); integer pipeline 99.45%.
+- Golden model, ref_c and the front end decode BitNetMCU 8-bit layers (`decode_8bit`, `fc_8bit`); `compile.py --int8 {plain,dense,code}`; CMake `-DINT8=`; `measure.sh` 8th field. tern80 output unchanged by the plumbing (regenerated files identical).
+- First board profile: CMSIS-NN beat our dense format on int8 linear layers (fc1 71k vs 111k cycles).
+- **Dense kernel, 4 rows at a time** (activations loaded once per 4 rows) and `sxtb16 ror #8` written directly: fc1 111k → 76k, fc2 22.6k → 16.5k. 2 rows: 85k; 8 rows spill: 87k.
+- The helper change touched every `--simd` file: all 53 generated variants regenerated and bit-exact on the PC.
+- Finals (10k, all bit-exact): int8 model one core SRAM 3.73 ms (CMSIS-NN 14.54 ms, 3.90x), two cores 2.12 ms (6.86x). Code no longer beats dense from SRAM (3.82 ms). tern80 fc2 dense is now faster than fc2 as code. FINDINGS F24.
+
 ## 12 Nov 2026 (later): idea C in the compiler (`--stream`)
 
 - `compile.py --stream`: dense-format linear layers stream their weights from flash (XIP stream FIFO, DMA, 8-row double buffer, SRAM function, core 0 only). Bit-exact on the PC (memcpy blocks) and on the board.
