@@ -234,6 +234,17 @@ fc1 dense from flash: 308k → 219k cycles (one core), and 526k → 219k against
 - **`SXTB16_ROR8`** is now inline asm `sxtb16 %0, %1, ror #8`. With `__sxtb16(__ror(x, 8))` gcc always emitted a separate `mov ror`.
 - Results (FINDINGS F24): int8 fc1 111k → 76k cycles (CMSIS-NN 71k), fc2 22.6k → 16.5k (CMSIS-NN 16.4k); tern80 fc1 dense 103k → 76k, fc2 int4 dense 22.6k → 16.5k (now faster than fc2 as code). Code format for int8: 85k for fc1 and about 170 KB of code, so dense wins from SRAM.
 
+### v1 step 10: tree layers (idea B, IR op `fff`, 13 Nov 2026)
+
+- **IR:** `fff` takes several weight tensors, so `Node` got a `tensors` dict (`nodes`, `leaf_in`, `leaf_out`); `attrs` hold the depth, the leaf width and a quant type per tensor. The semantics are in `ir.py` and `interp.py`; `bounds.py` takes the union over leaves.
+- **Front end:** `frontend_bitnetmcu.load_fff()` reads the .npz from `train/export_fff.py`. `compile.py` picks it when `train/export/<model>.npz` exists and no header does.
+- **Back end:** `emit_fff()`.
+  - Routing: up to d dot products over int8 node rows (`SMLAD` on the widened input with `--simd`).
+  - Leaves: each leaf's two layers are pseudo linear nodes, emitted by `emit_linear` / `emit_linear_fmt` in the format the flags give their weight type. They are called through two function tables, so only one leaf runs. Dense leaves share one int16 input buffer (the a16 names are rewritten); the hidden layer uses its own `relu_norm` and, for dense out-layers, one shared `h16`.
+  - The tree runs on core 0 in two-core builds.
+- File names, flags and `measure.sh` specs are unchanged: the model name (`fff80`) selects the tree.
+- Results (FINDINGS F25): the tree stage takes 17.5k cycles (code) and 22.3k (dense) from SRAM, against 67.2k / 94.2k for the twin's fc1 + fc2; 103k against 645k from flash.
+
 ## Lessons
 
 - The worst-case bound analysis belongs in the compiler: it decides data types (int16 vs int32) and proves no overflow. The current interpreter only *asserts* int32 safety at run time.

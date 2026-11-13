@@ -41,14 +41,19 @@ def main():
     args = ap.parse_args()
 
     header = ROOT / 'train' / 'export' / f'{args.model}.h'
-    graph = frontend_bitnetmcu.load(header)
+    fff = not header.exists() and header.with_suffix('.npz').exists()     # idea B: a tree model (train/export_fff.py)
+    if fff:
+        header = header.with_suffix('.npz')
+        graph = frontend_bitnetmcu.load_fff(header)
+    else:
+        graph = frontend_bitnetmcu.load(header)
     print(graph.describe())
     if args.check:
         sys.path.insert(0, str(ROOT / 'harness'))
-        from golden import Golden
+        from golden import Golden, GoldenFFF
         from run import load_mnist
         _, _, img8 = load_mnist(args.check)
-        ok = (interp.run(graph, img8) == Golden(header).logits(img8)).all()
+        ok = (interp.run(graph, img8) == (GoldenFFF if fff else Golden)(header).logits(img8)).all()
         print(f'IR interpreter == golden on {args.check} images: {ok}')
         if not ok:
             sys.exit(1)

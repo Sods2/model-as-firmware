@@ -1,0 +1,81 @@
+# Description: Training parameters for the training script
+
+# Model selection
+model: 'CNNMNIST_FFF'  # model-as-firmware: idea B, fc1+fc2 as a fast feedforward tree
+dataset: 'MNIST' # 'MNIST', or EMNIST splits: EMNIST_BALANCED, EMNIST_BYCLASS, EMNIST_BYMERGE, EMNIST_LETTERS, EMNIST_DIGITS, EMNIST_MNIST
+  
+# Quantization settings
+QuantType: '4bitsym' # 'Ternary', 'Binary', 'BinaryBalanced', '2bitsym', '4bit', '4bitsym', '8bit', 'None", 'FP130', 'NF4'
+NormType: 'RMS' # 'RMS', 'Lin', 'BatchNorm'
+WScale: 'PerTensor' # 'PerTensor', 'PerOutput'
+act_bits: 8              # activation code width: 8 (default) or 4 (16 linear levels, per-token max)
+first_layer_act_bits: 8  # the first layer sees the signed input image; keep 8 bit there (paper: quantizing it to 4 costs <=0.1%)
+act_pow2: False          # True: per-token scale rounded to a power of two + truncation = exact MCU ShiftNorm behaviour
+act_pow2_round: False    # pow2 mode: round to nearest instead of truncating ((acc + 2^(sh-1)) >> sh on the device)
+act_mantissa: 'none'     # pow2 mode: 'max' (per-token 4-bit mantissa, x=(x*m)>>3) or 'recip8' (per-token 8-bit reciprocal
+                         # scale, (acc*s)>>t - recommended for deployment, removes the power-of-two requantization loss)
+table_scale: 0           # >0: NF4 levels rounded to 1/table_scale = int16 product-table grid (2048 for a 512B int16 table)
+
+# Clipping parameters - only used for 2 bit and higher quantization
+maxw_algo: 'octav' # 'octav', 'octav_cb' (codebook-aware, needed for NF4), 'prop' Algorithm used to calculate the clipping parameters (maximum weight)
+clip_init: True # initialize the clipping scalars from the initial weights before the first epoch
+maxw_update_until_epoch: 60 # Update clipping parameters until this epoch, they are frozen afterwards
+maxw_quantscale: 0.25  # Used only for clipping_algo='prop'. Determines the relation between stddev of weights and max_weight
+
+# Learning parameters
+num_epochs: 60  # 5, 20, 80
+batch_size: 64
+scheduler: "Cosine" # "StepLR", "Cosine", "CosineWarmRestarts"
+learning_rate: 0.001
+optimizer: 'Adam' # 'Adam' or 'Muon'. Muon: orthogonalized momentum on hidden weight matrices, Adam (learning_rate) on head/small tensors
+muon_lr: 0.02
+muon_momentum: 0.95
+muon_head: False # True: classifier head also on Muon (default: Adam on the head)
+
+# CosineWarmRestarts parameters
+# T_0: 5     # Period of the first restart for CosineWarmRestarts - 10+20+40 = 70 epochs, need to step in epoch 69 at minimum LR
+# T_mult: 4  # Factor increasing T_i after a restart
+
+# StepLR parameters
+# lr_decay: 0.1     # lr_decay and step size for StepLR
+# step_size: 10
+
+# halve_lr_epoch: 30  # Epoch at which to halve the learning rate - to be used with Cosine schedule 
+
+# Data augmentation
+augmentation: True
+rotation1: 10  # rotation1 and rotation2 are used for data augmentation
+rotation2: 10
+elastictransformprobability: 0.0 # probability of applying elastic transform
+augmentation_pool: 0 # 0 = on-the-fly augmentation (slow dataloader, 60k originals + 60k fresh augmented per epoch).
+                     # N>0 = pre-materialize a fixed pool of originals + N augmented copies once (in GPU, fast). Only used if augmentation is True.
+                     # -1 = GPU on-the-fly: fresh random affine/elastic copies generated on the GPU every epoch (fast, unexhaustible)
+augmentation_copies: 1 # augmented copies per epoch for the GPU on-the-fly mode (1 -> 60k originals + 60k augmented per epoch, like the PIL path)
+gpu_aug_interp: 'bilinear' # 'bilinear' (smooth) or 'nearest' (aliasing jitter, matches torchvision's default and adds more variation)
+pool_seed: 0         # seed for generating the augmentation pool
+
+# channel pruning settings. Requires "MaskLayer" in the model, otherwise these settings have no effect
+lambda_l1: 0.0005         # L1 regularization parameter for mask learning
+prune_epoch: -1           # Epoch at which to start pruning. -1 means no pruning
+prune_groupstoprune: 32   # number of groups to prune
+prune_totalgroups: 96     # total number of groups. e.g. if there are 384 channels and 96 groups, then each group has 4 channels
+
+# Model parameters
+cnn_width: 80       # 80-wide ternary run (docs/documentation.md, Jan 2 2026: 99.52% test)
+network_width1: 96
+network_width2: 64
+network_width3: 0
+fc1_quant: 'Ternary'  # model-as-firmware patch, see models.py CNNMNIST
+
+# name
+runtag: "fff80"
+
+# Idea B (model-as-firmware): fc1 + fc2 replaced by a fast feedforward tree of the same training width.
+# 2^fff_depth leaves x fff_leaf neurons = network_width1 (96), so tern80 is the dense twin.
+fff_depth: 3
+fff_leaf: 12
+fff_node_quant: '8bit'   # the routing neurons
+fff_harden: 1.0          # weight of the hardening loss (mean entropy of the node decisions) in the soft phase
+fff_hard_epoch: 40       # from this epoch: hard routing, straight-through gradients to the nodes
+fff_balance: 1.0         # weight of the load-balancing loss (KL of batch leaf usage to uniform); without it the tree collapsed
+fff_harden_ramp: 10      # the hardening weight ramps up linearly over this many epochs

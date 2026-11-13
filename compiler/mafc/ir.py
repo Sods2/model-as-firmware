@@ -18,6 +18,11 @@ Ops
                smallest power-of-two right shift that brings max <= 127, round half up, clip to 0..127
   linear       (N_in,) int8 -> (N_out,) int32                           y = W x, no bias;
                weights (N_out, N_in); attrs: quant 'ternary' {-1,0,1} | 'int4sym' odd {-15..15} | 'int8'
+  fff          (N_in,) int8 -> (N_out,) int32                           idea B, a fast feedforward tree (no bias):
+               tensors nodes (2^d - 1, N_in), leaf_in (2^d, L, N_in), leaf_out (2^d, N_out, L);
+               attrs depth d, leaf L, quant_nodes / quant_in / quant_out.
+               n = 0; for each level m: n = 2n + (nodes[2^m - 1 + n] . x >= 0);
+               h = leaf_in[n] @ x; y = leaf_out[n] @ relu_norm(h)       (only leaf n is computed)
   argmax       (N,) -> scalar                                           index of the first maximum
 """
 from dataclasses import dataclass, field
@@ -37,6 +42,7 @@ class Node:
     dtype: str = 'int32'
     attrs: dict = field(default_factory=dict)
     weights: np.ndarray = None
+    tensors: dict = None          # ops with several weight tensors (fff)
 
     def check(self):
         w = self.weights
@@ -54,6 +60,15 @@ class Node:
             assert w.min() >= lo and w.max() <= hi
             if self.attrs['quant'] == 'int4sym':
                 assert np.all(w % 2 == 1), 'int4sym weights are odd'
+        elif self.op == 'fff':
+            d, L = self.attrs['depth'], self.attrs['leaf']
+            n_in, n_out = int(np.prod(self.in_shape)), self.out_shape[0]
+            t = self.tensors
+            assert t['nodes'].shape == (2 ** d - 1, n_in)
+            assert t['leaf_in'].shape == (2 ** d, L, n_in) and t['leaf_out'].shape == (2 ** d, n_out, L)
+            for key, q in (('nodes', 'quant_nodes'), ('leaf_in', 'quant_in'), ('leaf_out', 'quant_out')):
+                lo, hi = QUANT_RANGES[self.attrs[q]]
+                assert t[key].min() >= lo and t[key].max() <= hi, key
         elif self.op == 'maxpool2':
             c, h, wd = self.in_shape
             assert h % 2 == 0 and wd % 2 == 0 and self.out_shape == (c, h // 2, wd // 2)
@@ -64,6 +79,8 @@ class Node:
             w = self.weights
             q = self.attrs.get('quant', 'int8')
             s += f'  w {q} {w.size} ({(w == 0).mean() * 100:.0f}% zero)'
+        if self.tensors is not None:
+            s += '  ' + ', '.join(f'{k} {v.shape}' for k, v in self.tensors.items())
         extra = {k: v for k, v in self.attrs.items() if k != 'quant'}
         return s + (f'  {extra}' if extra else '')
 
@@ -87,5 +104,6 @@ class Graph:
         """IR without weights, for inspection and diffs."""
         return json.dumps({'name': self.name, 'nodes': [
             {'name': n.name, 'op': n.op, 'in': list(n.in_shape), 'out': list(n.out_shape), 'dtype': n.dtype,
-             'attrs': n.attrs, 'weights': None if n.weights is None else list(n.weights.shape)}
+             'attrs': n.attrs, 'weights': None if n.weights is None else list(n.weights.shape),
+             'tensors': None if n.tensors is None else {k: list(v.shape) for k, v in n.tensors.items()}}
             for n in self.nodes]}, indent=1)

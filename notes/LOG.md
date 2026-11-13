@@ -2,6 +2,16 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 13 Nov 2026: idea B, a fast feedforward tree in place of fc1 + fc2
+
+- Read the FFF paper (arXiv 2308.14711): single-neuron sigmoid nodes route to one of 2^d leaves; soft mixture plus an entropy "hardening" loss in training, hard routing at inference. On plain MNIST MLPs it lost about 3 points.
+- BitNetMCU patch: `FFFLayer` / `CNNMNIST_FFF` (models.py) and two hooks in training.py (`aux_loss`, `set_epoch`). Config `train/configs/fff_cnn80.yaml`: depth 3, leaves of 12 (8 × 12 = 96, so tern80 is the dense twin), int8 nodes, ternary leaf in, int4 leaf out, hard routing with straight-through gradients from epoch 40.
+- Export: `train/export_fff.py` (integer codes to .npz); checked on tern80, where it matches the BitNetMCU header exactly.
+- `GoldenFFF` (harness), IR op `fff`, interpreter, bounds and `emit_fff` (compiler). The PC and board pipeline worked first time on an interim checkpoint, bit-exact.
+- **Run 1 collapsed:** every image went to leaf 7 (all node logits about +31); hard test accuracy 84–95% while soft training looked fine. Found by counting leaf use on the test set.
+- **Run 2** with a load-balancing loss (KL of batch leaf usage to uniform) and a 10-epoch hardening ramp: 99.15% final, 99.19% best (tern80 99.45%). Leaves used evenly (10.9–13.8%), each specialised in 2–3 digits.
+- Board (10k images, all bit-exact): the tree stage takes 17.5k cycles against 67.2k for fc1 + fc2 as code (SRAM), and 103k against 645k as dense data from flash. Whole model: 3.23 ms one core (twin 3.56), 1.86 ms two cores (twin 1.99), 4.09 ms from flash with dense weights (twin 8.05 ms; flash read 10.7 vs 45.0 KB). Keep. FINDINGS F25.
+
 ## 12 Nov 2026 (evening): energy tooling, int8 layers, 4-row dense kernel
 
 - **Energy tooling (step 2b, ready for the cable):** firmware command `L` + 2 bytes runs `ref_infer()` back to back for N seconds with no USB traffic; `harness/energy.py` walks through an idle and a busy phase and asks for the meter readings (mWh, mW or mA); `measure.sh energy` builds, flashes and runs it per build. Checked with `--no-meter`: 2,508 inferences in 5 s = 1.994 ms, the same as the final.

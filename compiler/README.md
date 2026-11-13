@@ -81,6 +81,10 @@ Numbers: FINDINGS F16.
 
 Numbers: FINDINGS F18.
 
+## Tree layers (idea B)
+
+A model exported by `train/export_fff.py` (`train/export/<model>.npz`, e.g. `fff80`) contains a fast feedforward tree in place of fc1 + fc2 (IR op `fff`). A few int8 routing neurons pick one leaf, and only that leaf's two small layers run. The leaves use the formats of their weight types (`--ternary` for the leaf input layer, `--int4` for the output layer; packed int4 needs widths divisible by 8, so use `--int4 code` or `dense` for 12-wide leaves). Example: `compile.py --model fff80 --simd --ternary code --int4 dense`. FINDINGS F25.
+
 ## int8 layers (`--int8`)
 
 `--int8 {plain,dense,code}` sets the format of int8 linear layers (BitNetMCU `8bit`, e.g. the `int8_80` model): `plain` is a multiply loop over an int8 array, `dense` is the `SXTB16`/`SMLAD` kernel (needs `--simd`), `code` compiles the weights into instructions, grouped by magnitude. File suffix `_i8<fmt>`, CMake `-DINT8=`, `measure.sh` 8th field. Use `dense`: with almost no zero weights, code is slower and about 170 KB larger (FINDINGS F24).

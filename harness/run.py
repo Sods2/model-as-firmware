@@ -28,10 +28,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 BITNET = ROOT / 'train' / 'BitNetMCU'
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from golden import Golden, GoldenS8  # noqa: E402
+from golden import Golden, GoldenFFF, GoldenS8  # noqa: E402
 
 CONFIGS = {'tern80': 'ternary_cnn80.yaml', 'tern80z70': 'ternary_cnn80_z70.yaml', 'tern80z90': 'ternary_cnn80_z90.yaml',
-           'int8_80': 'int8_cnn80.yaml'}
+           'int8_80': 'int8_cnn80.yaml', 'fff80': 'fff_cnn80.yaml'}
+FFF_MODELS = {'fff80'}   # idea B: tree models, exported to train/export/<model>.npz by train/export_fff.py
 SIZE_TOOL = Path.home() / '.pico-sdk/toolchain/15_2_Rel1/bin/arm-none-eabi-size.exe'
 SUMMARY_COLS = ['date', 'build', 'model', 'target', 'n_images', 'accuracy_pct', 'golden_match_pct',
                 'pytorch_agree_pct', 'latency_ms_mean', 'cycles_mean', 'cycles_min', 'cycles_max', 'sys_mhz',
@@ -61,10 +62,14 @@ def pytorch_preds(model_name, x):
     sys.path.insert(0, str(BITNET))
     os.chdir(BITNET)  # BitNetMCU's modules expect to run from their folder
     try:
-        from exportquant import load_model
         with open(ROOT / 'train' / 'configs' / CONFIGS[model_name]) as f:
             params = yaml.safe_load(f)
-        model = load_model(params['model'], params)
+        if model_name in FFF_MODELS:     # training's loader passes the tree parameters; eval (no grad) = hard routing
+            from training import load_model
+            model = load_model(params['model'], {**params, 'num_classes': 10})
+        else:
+            from exportquant import load_model
+            model = load_model(params['model'], params)
         model.load_state_dict(torch.load(ROOT / 'train' / 'models' / f'{model_name}.pth', map_location='cpu'),
                               strict=False)
         model.eval()
@@ -162,7 +167,9 @@ def main():
     args = ap.parse_args()
 
     x, y, img8 = load_mnist(args.n)
-    if args.golden == 'ref':
+    if args.golden == 'ref' and args.model in FFF_MODELS:
+        golden = GoldenFFF(ROOT / 'train' / 'export' / f'{args.model}.npz')
+    elif args.golden == 'ref':
         golden = Golden(ROOT / 'train' / 'export' / f'{args.model}.h')
     else:
         golden = GoldenS8(ROOT / 'firmware' / 'baselines' / 'cmsis_nn' / f'model_s8_{args.model}.h')
@@ -231,7 +238,7 @@ def main():
         total = sum(stages.values())
         print('  stages (image 0):  ' + ', '.join(f'{k} {v} ({v / total * 100:.0f}%)' for k, v in stages.items()))
         # one file per stage set, so columns always line up (dual-core builds add a 'join' stage)
-        suffix = '_stages_dual.csv' if 'join' in stages else '_stages.csv'
+        suffix = ('_fff' if 'fff' in stages else '') + ('_stages_dual.csv' if 'join' in stages else '_stages.csv')
         sp = Path(args.csv).with_name(Path(args.csv).stem + suffix)
         new_s = not sp.exists()
         if not new_s:

@@ -16,6 +16,7 @@ import numpy as np
 
 from . import __version__
 from .bounds import bounds, fits_int16
+from .ir import Node
 
 TERNARY_DIGIT = {1: 0, -1: 1, 0: 2}   # base-3 digit for each weight value (matches the decoder below)
 
@@ -587,6 +588,95 @@ static inline void {nm}_widen(const int8_t *restrict in) {{
     raise ValueError(fmt)
 
 
+def emit_fff(node, simd, ternary, int4, int8):
+    """Idea B: a fast feedforward tree layer. Returns (weights C text, functions C text, globals C text).
+    Routing nodes: int8 rows, SMLAD on an int16 copy of the input (simd) or a plain loop. Each leaf's two layers are
+    ordinary linear layers in the format chosen for their weight type (--ternary / --int4 / --int8), one function per
+    leaf, called through a table: only the reached leaf's code runs and only its weights are read."""
+    nm, t, a = node.name, node.tensors, node.attrs
+    d, L = a['depth'], a['leaf']
+    n_in, n_out = int(np.prod(node.in_shape)), node.out_shape[0]
+    fmt_of = {'ternary': ternary if ternary != 'base3' else None, 'int4sym': int4 if int4 != 'packed' else None,
+              'int8': int8 if int8 != 'plain' else None}
+    data, funcs, glob = [], [], ''
+    # routing nodes
+    assert a['quant_nodes'] == 'int8'
+    if simd:
+        assert n_in % 4 == 0
+        b = t['nodes'].astype(np.int64).reshape(-1, n_in // 4, 4) & 0xFF
+        words = (b[:, :, 0] | (b[:, :, 2] << 8) | (b[:, :, 1] << 16) | (b[:, :, 3] << 24)).reshape(-1)
+        k = n_in // 4
+        data.append(c_array('uint32_t', f'{nm}_nw', words, '0x{:08X}', 8))
+        glob += f'static int16_t {nm}_a16[{n_in}] __attribute__((aligned(4)));   // {nm} input widened to int16\n'
+        funcs.append(f"""// {nm}: routing node k of the tree (int8 weights, 4 per word, bytes w0 w2 w1 w3): logit = nodes[k] . in
+static inline int32_t {nm}_node(const int8_t *restrict in, int k) {{
+    (void)in;
+    const uint32_t *w = {nm}_nw + k * {k};
+    const int16_t *a = {nm}_a16;
+    int32_t s = 0;
+    for (int j = 0; j < {k}; j++) {{
+        uint32_t ww = w[j], a01, a23;
+        memcpy(&a01, a + 4 * j, 4);
+        memcpy(&a23, a + 4 * j + 2, 4);
+        s = SMLAD(SXTB16(ww), a01, s);
+        s = SMLAD(SXTB16_ROR8(ww), a23, s);
+    }}
+    return s;
+}}
+""")
+    else:
+        data.append(c_array('int8_t', f'{nm}_nw', t['nodes'].reshape(-1)))
+        funcs.append(f"""// {nm}: routing node k of the tree (int8 weights): logit = nodes[k] . in
+static inline int32_t {nm}_node(const int8_t *restrict in, int k) {{
+    const int8_t *w = {nm}_nw + k * {n_in};
+    int32_t s = 0;
+    for (int i = 0; i < {n_in}; i++) s += (int32_t)w[i] * in[i];
+    return s;
+}}
+""")
+    # leaves: two linear layers each, emitted by the ordinary linear emitters
+    h_dense = False
+    for part, key, qk, shp_in, shp_out in (('in', 'leaf_in', 'quant_in', n_in, L), ('out', 'leaf_out', 'quant_out', L, n_out)):
+        q = a[qk]
+        fmt = fmt_of[q]
+        for j in range(2 ** d):
+            pn = Node(f'{nm}_{part}{j}', 'linear', (shp_in,), (shp_out,), 'int32', {'quant': q}, t[key][j])
+            if fmt:
+                dd, f, pre, g = emit_linear_fmt(pn, fmt, rows=False)
+                if fmt == 'dense':
+                    # all leaves share one int16 copy of their input: the tree input for 'in', the hidden layer for 'out'
+                    shared = f'{nm}_a16' if part == 'in' else f'{nm}_h16'
+                    f = f.replace(f'{pn.name}_a16', shared)
+                    if part == 'out':
+                        h_dense = True
+                    assert part == 'out' or simd
+            else:
+                if q == 'int4sym':
+                    assert shp_in % 8 == 0, f'{nm}: packed int4 needs a leaf input width divisible by 8; use --int4 code or dense'
+                dd, f = emit_linear(pn)
+            data.append(dd)
+            funcs.append(f)
+        funcs.append(f'static void (*const {nm}_{part}_tab[{2 ** d}])(const int8_t *restrict, int32_t *restrict) = {{\n    ' +
+                     ', '.join(f'{nm}_{part}{j}' for j in range(2 ** d)) + '};\n')
+    if h_dense:
+        glob += f'static int16_t {nm}_h16[{L}] __attribute__((aligned(4)));   // {nm} leaf hidden layer widened to int16\n'
+    glob += f'static int32_t {nm}_h[{L}];\nstatic int8_t {nm}_h8[{L}];\n'
+    funcs.append(emit_relu_norm(Node(f'{nm}_hn', 'relu_norm', (L,), (L,), 'int8')))
+    widen = f'    for (int i = 0; i < {n_in}; i++) {nm}_a16[i] = in[i];   // for the routing nodes and dense leaves\n' if simd else ''
+    hwiden = f'    for (int i = 0; i < {L}; i++) {nm}_h16[i] = {nm}_h8[i];\n' if h_dense else ''
+    funcs.append(f"""// {nm}: fast feedforward tree (idea B): depth {d}, {2 ** d} leaves of {L} neurons, {n_in} -> {n_out}.
+// The path takes {d} routing dot products; then only the reached leaf runs: {n_in} -> {L} (relu_norm) -> {n_out}.
+static void {nm}(const int8_t *restrict in, int32_t *restrict out) {{
+{widen}    int n = 0;
+    for (int m = 0; m < {d}; m++) n = 2 * n + ({nm}_node(in, (1 << m) - 1 + n) >= 0);
+    {nm}_in_tab[n](in, {nm}_h);
+    {nm}_hn({nm}_h, {nm}_h8);
+{hwiden}    {nm}_out_tab[n]({nm}_h8, out);
+}}
+""")
+    return ''.join(data), '\n'.join(funcs), glob
+
+
 CONV_FORMATS = ('data', 'code')
 
 
@@ -619,7 +709,7 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
         assert streamed, '--stream needs a dense-format layer (--ternary/--int4/--int8 dense)'
         par_linear -= streamed
     stage_names = [nodes[i].name for i in seg] + (['join'] if cores == 2 else []) + \
-                  [nd.name for nd in rest if nd.op == 'linear']
+                  [nd.name for nd in rest if nd.op in ('linear', 'fff')]
     stage_id = {n: k for k, n in enumerate(stage_names)}
 
     # Typed plan for the fused segment. With simd, a tensor is stored as int16 when bounds.py proves it
@@ -688,8 +778,13 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
                 d, f = emit_linear(nd, rows=nd.name in par_linear)
             weights.append(d)
             funcs.append(f)
+        elif nd.op == 'fff':
+            d, f, glob = emit_fff(nd, simd, ternary, int4, int8)
+            weights.append(d)
+            funcs.append(f)
+            extra_globals += glob
 
-    tail_max = max([int(np.prod(nd.out_shape)) for nd in rest if nd.op in ('relu_norm', 'linear')] + [feat_ch * n_ch])
+    tail_max = max([int(np.prod(nd.out_shape)) for nd in rest if nd.op in ('relu_norm', 'linear', 'fff')] + [feat_ch * n_ch])
 
     def seg_loop(lo, hi, pa, pb, prof, indent='    ', p16=None):
         """p16: names of the two int16 planes for this core (needed when the plan uses int16)."""
@@ -796,6 +891,11 @@ static inline void join_job(void) {{}}
                 body.append(f'    {nd.name}({src}, {dst});')
             body.append(f'    PROF_STAGE({stage_id[nd.name]});')
             src = dst
+        elif nd.op == 'fff':
+            assert src == 'act'
+            body.append(f'    {nd.name}(act, acc);')
+            body.append(f'    PROF_STAGE({stage_id[nd.name]});')
+            src = 'acc'
     body += [
         '    uint32_t best = 0;',
         '    for (uint32_t i = 1; i < 10; i++) if (logits[i] > logits[best]) best = i;',

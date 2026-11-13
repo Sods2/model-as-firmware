@@ -160,6 +160,52 @@ class Golden:
         return _trace(self, img)
 
 
+class GoldenFFF(Golden):
+    """Idea B: the integer pipeline of a CNNMNIST_FFF model (fc1 + fc2 replaced by a fast feedforward tree), read from
+    the .npz written by train/export_fff.py. Same conv stack and requantization as Golden; the tree layer:
+      route: n = 0; at level m the node 2^m - 1 + n has logit = nodes[.] . a; n = 2n + (logit >= 0)   (d levels)
+      leaf n: h = leaf_in[n] @ a (int32, leaf values); h8 = relu_norm(h); y = leaf_out[n] @ h8 (int32, d_out values)
+    then relu_norm and fc3 as in Golden. Written independently of the compiler's interpreter (compiler/mafc/interp.py)."""
+
+    def __init__(self, npz):
+        z = np.load(npz)
+        self.name = Path(npz).stem
+        self.k1, self.k2, self.k3 = z['conv1'], z['dw1'], z['dw2']
+        self.n_ch = self.k1.shape[0]
+        self.depth, self.leaf = int(z['depth']), int(z['leaf'])
+        self.nodes, self.leaf_in, self.leaf_out, self.fc3 = z['nodes'], z['leaf_in'], z['leaf_out'], z['fc3']
+        assert self.nodes.shape[0] == 2 ** self.depth - 1 and self.leaf_in.shape[:2] == (2 ** self.depth, self.leaf)
+        self.max_abs_bound = 0
+        self.leaves = None            # leaf reached by each image of the last call
+
+    def _tree(self, a):
+        logits = a @ self.nodes.T                                          # every node, for simplicity
+        self._bound(np.abs(a) @ np.abs(self.nodes).T)
+        n = np.zeros(a.shape[0], dtype=np.int64)
+        rows = np.arange(a.shape[0])
+        for m in range(self.depth):
+            n = 2 * n + (logits[rows, 2 ** m - 1 + n] >= 0)
+        self.leaves = n
+        win, wout = self.leaf_in[n], self.leaf_out[n]                      # [N, leaf, n_in], [N, d_out, leaf]
+        self._bound(np.einsum('nki,ni->nk', np.abs(win), np.abs(a)))
+        h = np.einsum('nki,ni->nk', win, a)
+        h8 = self._relu_norm(h)
+        self._bound(np.einsum('nok,nk->no', np.abs(wout), np.abs(h8)))
+        return np.einsum('nok,nk->no', wout, h8)
+
+    def _forward(self, imgs, keep):
+        x = imgs.astype(np.int64).reshape(-1, 1, 16, 16)
+        x = np.broadcast_to(x, (x.shape[0], self.n_ch, 16, 16))
+        x = keep('conv1', self._conv(x, self.k1))
+        x = keep('dw1', self._conv(x, self.k2))
+        x = keep('pool1', self._pool(x))
+        x = keep('dw2', self._conv(x, self.k3))
+        x = keep('pool2', self._pool(x))
+        a = self._relu_norm(x.reshape(x.shape[0], -1))
+        a = keep('fff', self._relu_norm(self._tree(a)))
+        return keep('fc3', self._fc(a, self.fc3))
+
+
 # ---------------------------------------------------------------------------------------------
 # CMSIS-NN int8 baseline (firmware/baselines/cmsis_nn), built with CMSIS_NN_USE_SINGLE_ROUNDING.
 # Same integer weight codes as above; activations are int8 with static, calibrated per-layer scales.

@@ -1,0 +1,230 @@
+{
+ "name": "fff80",
+ "nodes": [
+  {
+   "name": "input",
+   "op": "input",
+   "in": [
+    1,
+    16,
+    16
+   ],
+   "out": [
+    1,
+    16,
+    16
+   ],
+   "dtype": "int8",
+   "attrs": {},
+   "weights": null,
+   "tensors": null
+  },
+  {
+   "name": "conv1",
+   "op": "conv3x3",
+   "in": [
+    1,
+    16,
+    16
+   ],
+   "out": [
+    80,
+    14,
+    14
+   ],
+   "dtype": "int32",
+   "attrs": {
+    "mode": "broadcast",
+    "shift": 4
+   },
+   "weights": [
+    80,
+    3,
+    3
+   ],
+   "tensors": null
+  },
+  {
+   "name": "dw1",
+   "op": "conv3x3",
+   "in": [
+    80,
+    14,
+    14
+   ],
+   "out": [
+    80,
+    12,
+    12
+   ],
+   "dtype": "int32",
+   "attrs": {
+    "mode": "depthwise",
+    "shift": 4
+   },
+   "weights": [
+    80,
+    3,
+    3
+   ],
+   "tensors": null
+  },
+  {
+   "name": "pool1",
+   "op": "maxpool2",
+   "in": [
+    80,
+    12,
+    12
+   ],
+   "out": [
+    80,
+    6,
+    6
+   ],
+   "dtype": "int32",
+   "attrs": {},
+   "weights": null,
+   "tensors": null
+  },
+  {
+   "name": "dw2",
+   "op": "conv3x3",
+   "in": [
+    80,
+    6,
+    6
+   ],
+   "out": [
+    80,
+    4,
+    4
+   ],
+   "dtype": "int32",
+   "attrs": {
+    "mode": "depthwise",
+    "shift": 4
+   },
+   "weights": [
+    80,
+    3,
+    3
+   ],
+   "tensors": null
+  },
+  {
+   "name": "pool2",
+   "op": "maxpool2",
+   "in": [
+    80,
+    4,
+    4
+   ],
+   "out": [
+    80,
+    2,
+    2
+   ],
+   "dtype": "int32",
+   "attrs": {},
+   "weights": null,
+   "tensors": null
+  },
+  {
+   "name": "norm0",
+   "op": "relu_norm",
+   "in": [
+    80,
+    2,
+    2
+   ],
+   "out": [
+    320
+   ],
+   "dtype": "int8",
+   "attrs": {},
+   "weights": null,
+   "tensors": null
+  },
+  {
+   "name": "fff",
+   "op": "fff",
+   "in": [
+    320
+   ],
+   "out": [
+    64
+   ],
+   "dtype": "int32",
+   "attrs": {
+    "depth": 3,
+    "leaf": 12,
+    "quant_nodes": "int8",
+    "quant_in": "ternary",
+    "quant_out": "int4sym"
+   },
+   "weights": null,
+   "tensors": {
+    "nodes": [
+     7,
+     320
+    ],
+    "leaf_in": [
+     8,
+     12,
+     320
+    ],
+    "leaf_out": [
+     8,
+     64,
+     12
+    ]
+   }
+  },
+  {
+   "name": "norm2",
+   "op": "relu_norm",
+   "in": [
+    64
+   ],
+   "out": [
+    64
+   ],
+   "dtype": "int8",
+   "attrs": {},
+   "weights": null,
+   "tensors": null
+  },
+  {
+   "name": "fc3",
+   "op": "linear",
+   "in": [
+    64
+   ],
+   "out": [
+    10
+   ],
+   "dtype": "int32",
+   "attrs": {
+    "quant": "int4sym"
+   },
+   "weights": [
+    10,
+    64
+   ],
+   "tensors": null
+  },
+  {
+   "name": "argmax",
+   "op": "argmax",
+   "in": [
+    10
+   ],
+   "out": [],
+   "dtype": "int32",
+   "attrs": {},
+   "weights": null,
+   "tensors": null
+  }
+ ]
+}

@@ -4,7 +4,7 @@ Sends MNIST test images to a target, checks the outputs bit for bit against a go
 
 | File | Role |
 |---|---|
-| `golden.py` | Numpy golden models. `Golden` repeats the plain-C reference arithmetic, reading weights straight from `train/export/<model>.h`. `GoldenS8` does the same for the CMSIS-NN int8 build, from `firmware/baselines/cmsis_nn/model_s8_<model>.h`. |
+| `golden.py` | Numpy golden models. `Golden` repeats the plain-C reference arithmetic, reading weights straight from `train/export/<model>.h`. `GoldenS8` does the same for the CMSIS-NN int8 build, from `firmware/baselines/cmsis_nn/model_s8_<model>.h`. `GoldenFFF` is the tree model of idea B (`fff80`), read from `train/export/<model>.npz`. |
 | `run.py` | Runs one target (`golden`, `host` = the C reference built for the PC, `pico` = the board over USB serial). Compares with the golden model, the PyTorch model and the labels, and appends a row to `results/phase0.csv`. On the board it also reads the XIP cache counters (command `X`) and fills `flash_read_kb` (FINDINGS F22) |
 | `energy.py` | Energy per inference with the USB power meter (step 2b). The board idles for `--secs`, then runs inference back to back for `--secs` (firmware command `L`); you type in the meter reading after each phase (`--reading mwh|mw|ma`). Logs `results/energy.csv`: power idle and busy, energy per inference above idle and in total. `--no-meter` only checks the loop. Easiest through `measure.sh energy` |
 | `export_cmsis.py` | Calibrates and writes the CMSIS-NN int8 model header |
