@@ -16,6 +16,7 @@ train/export/<model>.h ──front end──► IR (integer ops + integer weight
 | `mafc/interp.py` | Numpy interpreter of the IR, the definition of "correct" for every back end |
 | `mafc/backend_rp2350_c.py` | IR -> C for the RP2350. Implements `ref_infer()` so the Phase 0 harness and firmware apply unchanged |
 | `compile.py` | Command line |
+| `mafc/lm_backend.py`, `compile_lm.py` | MafLM (Phase 3 language model): integer `.npz` (from `train/lm/intref.py --npz`) -> packed C data for `firmware/rp2350/maflm` (see notes/lm.md) |
 
 ## Use
 

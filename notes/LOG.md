@@ -215,3 +215,20 @@ Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise
 - Trained BitNetMCU's ternary CNN80: 99.45% final, 99.48% best (99.52% reported upstream). The fc1-sparse variants at 70% and 90% zeros lose no accuracy.
 - Patched BitNetMCU export: it silently re-quantized a ternary fc1 as 2-bit. See `train/bitnetmcu.patch`.
 - Two of the micro-USB cables on hand are charge-only. The power meter has a USB-C plug, which blocks step 2b.
+
+## 13 Nov 2026 (evening): Phase 3 starts; Atome baseline on the Pico, own model instead
+
+- **Atome LM** cloned and reproduced on the PC: greedy text matches its ESP32 log; 1.711 bits/byte (perplexity 3.27) on TinyStories V2-valid.
+- **Atome on the Pico 2** (upstream engine, window 24): bit-exact, **0.64 tok/s from flash, 0.71 from SRAM**.
+  - It is compute-bound: about 17 cycles per weight, and the whole window re-runs for every token.
+  - Running it needed a fix for unaligned float loads (`firmware/baselines/atome/model_blob.S`).
+- **Decision:** don't build on Atome. It has no feedforward layer for idea B, and float activations that don't fit our integer compiler. We train our own model, MafLM, as dense and tree twins of about 0.92M weights (`train/lm/`). Atome stays as the yardstick.
+- **2,000-step checks:** dense 1.427 and tree 1.507 bits/byte, both already better than Atome's 1.711. The tree reads 2.8x fewer weights per token, and its leaves stay balanced.
+- **Integer reference** (`train/lm/intref.py`, `intref_step.py`): within 0.007 bits/byte of the float model; token-by-token decoding with a KV cache is bit-identical to the batched reference.
+- Details in [lm.md](lm.md).
+- **Compiler and firmware v0 for MafLM** (`compiler/compile_lm.py`, `firmware/rp2350/maflm`):
+  - Bit-exact with the integer reference on the PC and on the Pico 2, for both twins and all four builds.
+  - Tree from SRAM: 97 tok/s over the first 24 positions and 55 tok/s over the 256 window. Dense: 45 and 34 tok/s. From flash: tree 54 and dense 22.5 tok/s.
+  - The tree is 2.1–2.4x faster than its dense twin. Attention dominates late in the window.
+- **Runtime v1** (activation lookup tables, 32-bit divisions, SMLAD attention): about 2x faster than v0, still bit-exact. Tree from SRAM: **195 tok/s** over the first 24 positions and 117 over the 256 window. Dense: 90 and 69. From flash: tree 106 and dense 43 tok/s. Next: the second core.
+- **Two cores:** tree from SRAM at **307 tok/s** (185 over the 256 window), dense at 147. From SRAM that is 1.6x on both twins; from flash only 1.1x, and only once flash-resident rows stay on one core. Splitting them made both cores contend for XIP and ran slower than one core.

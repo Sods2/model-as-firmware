@@ -4,6 +4,9 @@ build/
 # training
 train/.venv/
 train/BitNetMCU/
+train/atome-lm/
+train/data/
+train/runs/
 
 # firmware build variants and third-party sources
 build-*/
@@ -11,3 +14,6 @@ firmware/baselines/cmsis_nn/third_party/
 
 # python
 __pycache__/
+
+# generated data for throwaway check models (the real models' gen files are committed)
+firmware/rp2350/maflm/gen/maflm_check_*
