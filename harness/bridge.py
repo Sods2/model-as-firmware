@@ -98,7 +98,7 @@ class HostTarget:
 # Anything that drives the board. While one of these runs, the bridge must not open the serial port: on
 # Windows only one process can hold it, so grabbing it between two measurement runs (while measure.sh
 # flashes the next build) would make the next run.py fail to open it.
-BOARD_USERS = re.compile(r'harness[/\\](run\.py|measure\.sh|phase0_matrix\.sh)|picotool')
+BOARD_USERS = re.compile(r'harness[/\\](run\.py|measure\.sh|phase0_matrix\.sh)|picotool|openocd')
 
 
 def board_users():

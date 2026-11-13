@@ -496,7 +496,7 @@ Scope (F5, F17):
 
 | Question | How to test | Status |
 |---|---|---|
-| Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b). Tooling ready: firmware command `L`, `harness/energy.py`, `measure.sh energy` | Waiting for cable |
+| Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b). Tooling ready: firmware command `L`, `harness/energy.py`, `measure.sh energy` | Cable here (13 Nov); the USB meter is too coarse for the Pico 2 (reads 0–4 mA). Needs a finer instrument |
 | Bytes actually read from flash per inference | F22: measured with the XIP counters for every flash build (`flash_read_kb`): hybrid 1.2 KB, CMSIS-NN 45.5 KB | Done |
 | Idea B: tree over neurons (fast feedforward) | F25: depth-3 tree in place of fc1 + fc2: 6.6x fewer weights read, 3.8–6.2x faster for those layers, −0.30 points (99.15%); keep. Needs load balancing in training. Next: the tiny story model | Done for MNIST |
 | Idea C: DMA streaming of weights | F21: the stream FIFO with double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. F23: in the compiler (`--stream`), the 30 KB fc1 runs 29% faster on one core and 58% faster than two cores sharing the cache | Done |

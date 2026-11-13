@@ -30,7 +30,35 @@ arm-none-eabi-size firmware/baselines/ref_c/build/ref_c.elf
 - A Release build gives `-O3 -g -mcpu=cortex-m33 -march=armv8-m.main+fp+dsp`, Secure ARM mode, 150 MHz.
 - A project outside `firmware/rp2350/hello/` can reuse that folder's `pico_sdk_import.cmake` by path (see `ref_c/CMakeLists.txt`).
 
-## Flashing over USB (no Debug Probe)
+## Debug Probe (SWD)
+
+Arrived 13 Nov 2026. It enumerates as CMSIS-DAP v2 (VID:PID 2E8A:000C), with its UART bridge on COM4. Its **D** port goes to the Pico 2's 3-pin DEBUG connector.
+
+```bash
+OO=~/.pico-sdk/openocd/0.12.0+dev
+"$OO/openocd.exe" -s "$OO/scripts" -f interface/cmsis-dap.cfg -f target/rp2350.cfg -c "adapter speed 5000" -c "init; targets; exit"
+```
+
+- This finds `rp2350.cm0` and `rp2350.cm1` (Cortex-M33 r1p0, 8 breakpoints, 4 watchpoints each).
+- Probe firmware updated 13 Nov 2026 from 1.0.1 to **debugprobe v2.3.1** (`debugprobe.uf2` from github.com/raspberrypi/debugprobe releases). 1.0.1 made OpenOCD warn and fall back to a slow workaround; 2.3.1 doesn't.
+- To update: hold the BOOTSEL button inside the probe's case while plugging in its USB; it mounts as `RPI-RP2` (`INFO_UF2.TXT` says "Model: Raspberry Pi RP2", not "RP2040"); copy the `.uf2` onto it. Don't confuse it with the Pico 2's own BOOTSEL drive, which is labelled `RP2350`.
+- Unplug the SWD cable for energy measurements: its ground is a second return path around any USB-side meter.
+
+### Flashing over SWD (default since 13 Nov 2026)
+
+`harness/flash.sh` (sourced by `measure.sh` and `phase0_matrix.sh`) does this, with `picotool` as the fallback:
+
+```bash
+"$OO/openocd.exe" -s "$OO/scripts" -f interface/cmsis-dap.cfg -f target/rp2350.cfg -c "adapter speed 5000" \
+    -c "program {build/mafc.elf} verify" -c "cold_reset" -c "shutdown"
+```
+
+- Load the `.elf`, not the `.uf2`. OpenOCD writes by load address, so `copy_to_ram` builds work too (checked on mafc and CMSIS-NN RAM builds).
+- **Gotcha: use `cold_reset`, not `reset`.** `program ... verify reset exit` resets the cores with SYSRESETREQ, but the USB controller never drops off the bus. Windows keeps COM3 listed, and opening it fails with `PermissionError(13, 'A device attached to the system is not functioning.')`. `cold_reset` (defined in `target/rp2350.cfg`) resets the whole chip except the debug port, so USB enumerates again and COM3 works within about 2 s.
+- For the same reason, `wait_port` in `flash.sh` waits for the firmware to answer `?` rather than for COM3 to appear in the port list.
+- About 3–4 s per build from the start of flashing until the board answers, and no BOOTSEL step.
+
+## Flashing over USB (fallback, no Debug Probe)
 
 ```bash
 PT=~/.pico-sdk/picotool/2.3.1/picotool/picotool.exe
