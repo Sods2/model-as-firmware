@@ -287,6 +287,7 @@ def main() -> None:
     ap.add_argument("--npz", type=Path, help="write the integer model here")
     ap.add_argument("--eval-bytes", type=int, default=2_000_000)
     ap.add_argument("--seq", type=int, default=256)
+    ap.add_argument("--samples", type=int, default=0, help="also print greedy integer samples of this many bytes")
     a = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_float(a.pt)
@@ -297,7 +298,11 @@ def main() -> None:
     val = np.fromfile(HERE.parent / "data/tinystories/TinyStoriesV2-GPT4-valid.txt", dtype=np.uint8)[: a.eval_bytes]
     bf = bpb_float(model, val, a.seq, dev)
     bi = bpb_int(il, val, a.seq)
-    print(f"{a.pt.name}: float (fp32, fake-quant) {bf:.4f} bits/byte, integer {bi:.4f} (diff {bi - bf:+.4f})")
+    print(f"{a.pt.name}: float (fp32, fake-quant) {bf:.4f} bits/byte, integer {bi:.4f} (diff {bi - bf:+.4f}); "
+          f"integer perplexity {2 ** bi:.3f}")
+    for p in (["Once", "The dog", "A girl", "One day, Lily"] if a.samples else []):
+        out = bytes(generate_int(il, p.encode(), a.samples)).decode(errors="replace")
+        print(f"  {p!r} -> {out!r}")
 
 
 if __name__ == "__main__":
