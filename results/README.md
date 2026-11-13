@@ -168,6 +168,20 @@ From 12 Nov 2026, `flash_read_kb` is filled for board runs: XIP cache misses × 
 
 Note: the ref_c and cmsis_nn rows of this run are in `phase1.csv` (their earlier rows are in `phase0.csv`).
 
+### Idea B: tree vs dense twin (`notes` = `idea B: tree (fff80) vs dense twin (tern80)`)
+
+`fff80` replaces fc1 + fc2 with a depth-3 fast feedforward tree (FINDINGS F25). 10k images, all bit-exact. Accuracy: fff80 99.15%, tern80 99.47%. Profiles (stage cycles) are in `profile.csv`, with stage columns for the tree in `profile_fff_stages.csv`.
+
+| Build | fff80 (tree) | tern80 (twin) |
+|---|---|---|
+| mafc_v0_simd_code_i4code_ram | 3.236 ms | 3.555 ms |
+| mafc_v0_simd_code_i4dense_ram | **3.226 ms** | 3.556 ms |
+| mafc_v0_simd_dense_i4dense_ram | 3.256 ms | 3.733 ms |
+| mafc_v0_simd_code_i4dense (flash) | 3.451 ms, 4.0 KB read | 4.111 ms, 7.0 KB |
+| mafc_v0_simd_dense_i4dense (flash) | **4.088 ms, 10.7 KB read** | 8.050 ms, 45.0 KB |
+| mafc_v1_dual_simd_code_i4dense_ram (tree) / code_i4code_ram (twin) | **1.863 ms** | 1.994 ms |
+| mafc_v1_dual_simd_code_i4dense (tree) / code_i4code (twin), flash | 2.574 ms | 2.278 ms |
+
 ### int8 model (`notes` = `int8 model (all linear layers int8)`)
 
 The `int8_80` model: the tern80 CNN with all linear layers int8 (FINDINGS F24). 10k images, all bit-exact. Accuracy 99.45% for ref_c and every mafc build, 99.43% for CMSIS-NN.

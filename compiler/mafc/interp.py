@@ -39,6 +39,18 @@ def _linear(x, node):
     return x @ w.T
 
 
+def _fff(x, node):
+    t, d = node.tensors, node.attrs['depth']
+    n = np.zeros(x.shape[0], dtype=np.int64)
+    for m in range(d):
+        w = t['nodes'][2 ** m - 1 + n]                                     # [N, n_in], the node each image is at
+        n = 2 * n + ((w * x).sum(axis=1) >= 0)
+    win, wout = t['leaf_in'][n], t['leaf_out'][n]
+    assert (np.abs(win) * np.abs(x)[:, None, :]).sum(axis=2).max() <= INT32_MAX, f'{node.name}: int32 overflow possible'
+    h = _relu_norm((win * x[:, None, :]).sum(axis=2))
+    return (wout * h[:, None, :]).sum(axis=2)
+
+
 def run(graph, imgs):
     x = None
     logits = None
@@ -55,6 +67,8 @@ def run(graph, imgs):
         elif node.op == 'linear':
             x = _linear(x.reshape(x.shape[0], -1), node)
             logits = x
+        elif node.op == 'fff':
+            x = _fff(x.reshape(x.shape[0], -1), node)
         elif node.op == 'argmax':
             pass
         else:

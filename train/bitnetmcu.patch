@@ -46,7 +46,7 @@ index f42e69e..62958b7 100644
      except AttributeError:
          raise ValueError(f"Model {model_name} not found in models.py")
 diff --git a/models.py b/models.py
-index f135655..b825753 100644
+index f135655..32c8077 100644
 --- a/models.py
 +++ b/models.py
 @@ -97,7 +97,9 @@ class CNNMNIST(nn.Module):
@@ -81,3 +81,171 @@ index f135655..b825753 100644
      def forward(self, x):
          x = self.model(x)
          x = self.classifier(x)
+@@ -240,3 +247,127 @@ class PatchMNIST(nn.Module):
+                 outs.append(tb)
+             t = torch.cat(outs, dim=1)
+         return self.classifier(self.model(t))
++
++
++class FFFLayer(nn.Module):
++    """
++    model-as-firmware patch (idea B): a fast feedforward layer (Belcak & Wattenhofer 2023, arXiv 2308.14711).
++
++    A balanced binary tree of depth d over 2^d leaves. Node k (0 .. 2^d - 2, level by level) is one neuron
++    (BitLinear d_in -> 1, no bias); its children are 2k+1 (left) and 2k+2 (right), i.e. at level m node n has
++    children 2n and 2n+1 of level m+1. A leaf is a two-layer block d_in -> leaf (ReLU) -> d_out.
++
++    Inference (hard): at each node go right when its logit >= 0; only the reached leaf is computed.
++    Training: soft routing (the output is the mixture of all leaves weighted by the path probabilities,
++    p = sigmoid(logit) = probability of going right) plus a hardening loss (mean Bernoulli entropy of the
++    node decisions), then from epoch `hard_epoch` hard routing with a straight-through estimator (forward =
++    the hard leaf, gradient to the nodes through the soft path probabilities). Evaluation (no grad) is always hard.
++
++    Load balancing (added after the first run collapsed: hardening alone sent every image to one leaf, the
++    cheapest way to make every decision confident): balance * KL(mean leaf probability over the batch || uniform),
++    for the whole run. The hardening weight ramps up linearly over the first `harden_ramp` epochs.
++    """
++    def __init__(self, d_in, d_out, depth, leaf, node_quant, leaf_in_quant, leaf_out_quant, NormType, WScale,
++                 harden=1.0, hard_epoch=40, balance=1.0, harden_ramp=10):
++        super().__init__()
++        self.depth, self.leaf, self.n_leaves = depth, leaf, 2 ** depth
++        self.nodes = BitLinear(d_in, 2 ** depth - 1, QuantType=node_quant, NormType=NormType, WScale=WScale)
++        self.leaf_in = BitLinear(d_in, self.n_leaves * leaf, QuantType=leaf_in_quant, NormType=NormType, WScale=WScale)
++        self.leaf_out = nn.ModuleList([BitLinear(leaf, d_out, QuantType=leaf_out_quant, NormType=NormType, WScale=WScale)
++                                       for _ in range(self.n_leaves)])
++        self.harden, self.hard_epoch, self.epoch = harden, hard_epoch, 0
++        self.balance, self.harden_ramp = balance, harden_ramp
++        self.entropy = torch.zeros(())
++        self.probs = None
++        self.last_leaf = None
++
++    def hard_leaf(self, logits):
++        n = torch.zeros(logits.shape[0], dtype=torch.long, device=logits.device)
++        for m in range(self.depth):
++            go = (logits.gather(1, ((2 ** m - 1) + n).unsqueeze(1)).squeeze(1) >= 0).long()
++            n = 2 * n + go
++        return n
++
++    def forward(self, x):
++        B = x.shape[0]
++        logits = self.nodes(x)                                  # [B, 2^d - 1]
++        p = torch.sigmoid(logits)                               # probability of going right
++        probs = torch.ones(B, 1, device=x.device, dtype=x.dtype)
++        for m in range(self.depth):
++            pm = p[:, 2 ** m - 1: 2 ** (m + 1) - 1]
++            probs = torch.stack([probs * (1 - pm), probs * pm], dim=2).reshape(B, 2 ** (m + 1))
++        pe = p.clamp(1e-6, 1 - 1e-6)
++        self.entropy = -(pe * pe.log() + (1 - pe) * (1 - pe).log()).mean()
++        self.probs = probs
++        h = F.relu(self.leaf_in(x)).view(B, self.n_leaves, self.leaf)
++        outs = torch.stack([self.leaf_out[j](h[:, j]) for j in range(self.n_leaves)], dim=1)   # [B, 2^d, d_out]
++        hard = (not torch.is_grad_enabled()) or self.epoch >= self.hard_epoch
++        if hard:
++            idx = self.hard_leaf(logits)
++            self.last_leaf = idx
++            w = F.one_hot(idx, self.n_leaves).to(x.dtype)
++            if torch.is_grad_enabled():
++                w = w + probs - probs.detach()                 # straight-through to the nodes
++        else:
++            w = probs
++        return (w.unsqueeze(-1) * outs).sum(1)
++
++    def balance_kl(self):
++        q = self.probs.mean(0)                                  # leaf usage over the batch
++        return (q * (q * self.n_leaves).clamp_min(1e-9).log()).sum()
++
++    def aux_loss(self):
++        loss = self.balance * self.balance_kl()
++        if self.epoch < self.hard_epoch:
++            ramp = min(1.0, self.epoch / self.harden_ramp) if self.harden_ramp > 0 else 1.0
++            loss = loss + self.harden * ramp * self.entropy
++        return loss
++
++
++class CNNMNIST_FFF(nn.Module):
++    """
++    model-as-firmware patch (idea B): CNNMNIST with its fc1 + fc2 block (cnn_width*4 -> network_width1 -> network_width2)
++    replaced by a fast feedforward layer of the same training width: fff_depth levels, 2^fff_depth leaves of fff_leaf
++    neurons (2^fff_depth * fff_leaf = network_width1 for an equal-width twin). Leaves use fc1_quant on their input
++    layer and QuantType on their output layer, like fc1 and fc2 of CNNMNIST; nodes use fff_node_quant.
++    """
++    def __init__(self, network_width1=96, network_width2=64, network_width3=0, cnn_width=80, QuantType='4bitsym',
++                 WScale='PerTensor', NormType='RMS', num_classes: int = 10, fc1_quant='Ternary', ternary_zero_frac=0.0,
++                 fff_depth=3, fff_leaf=12, fff_node_quant='8bit', fff_harden=1.0, fff_hard_epoch=40,
++                 fff_balance=1.0, fff_harden_ramp=10):
++        super().__init__()
++        assert network_width3 == 0
++        self.features = nn.Sequential(
++            BitConv2d(1, cnn_width, kernel_size=3, stride=1, padding=(0,0),  groups=1,QuantType='8bit',NormType='None', WScale=WScale),
++            nn.ReLU(),
++            BitConv2d(cnn_width, cnn_width, kernel_size=3, stride=1, padding=(0,0),  groups=cnn_width,QuantType='8bit',NormType='None', WScale=WScale),
++            nn.ReLU(),
++            nn.MaxPool2d(kernel_size=2, stride=2),
++            BitConv2d(cnn_width, cnn_width, kernel_size=3, stride=1, padding=(0,0),  groups=cnn_width,QuantType='8bit',NormType='None', WScale=WScale),
++            nn.ReLU(),
++            nn.MaxPool2d(kernel_size=2, stride=2),
++            nn.Flatten(),
++        )
++        self.fff = FFFLayer(cnn_width * 4, network_width2, fff_depth, fff_leaf, fff_node_quant, fc1_quant, QuantType,
++                            NormType, WScale, harden=fff_harden, hard_epoch=fff_hard_epoch,
++                            balance=fff_balance, harden_ramp=fff_harden_ramp)
++        self.classifier = BitLinear(network_width2, num_classes, QuantType=QuantType, NormType=NormType, WScale=WScale)
++        for m in self.modules():
++            if isinstance(m, BitLinear) and m.QuantType == 'Ternary':
++                m.ternary_zero_frac = ternary_zero_frac
++
++    def set_epoch(self, epoch):
++        self.fff.epoch = epoch
++
++    def aux_loss(self):
++        return self.fff.aux_loss()
++
++    def fff_info(self):
++        q = self.fff.probs.mean(0).detach().cpu().numpy() if self.fff.probs is not None else []
++        return (f'H {self.fff.entropy.item():.3f} KL {self.fff.balance_kl().item():.3f} use ' +
++                '/'.join(f'{v * 100:.0f}' for v in q) + (' hard' if self.fff.epoch >= self.fff.hard_epoch else ' soft'))
++
++    def forward(self, x):
++        x = self.features(x)
++        x = F.relu(self.fff(x))
++        return self.classifier(x)
+diff --git a/training.py b/training.py
+index 9d3db20..dfcabf8 100644
+--- a/training.py
++++ b/training.py
+@@ -256,6 +256,8 @@ def train_model(model, device, hyperparameters, train_data, test_data, gpu_aug=N
+ 
+     # Train the CNN
+     for epoch in range(num_epochs):
++        if hasattr(model, 'set_epoch'):   # model-as-firmware patch: epoch-dependent training (FFF routing)
++            model.set_epoch(epoch)
+         correct = 0
+         train_loss=[]
+         start_time = time.time()
+@@ -272,6 +274,8 @@ def train_model(model, device, hyperparameters, train_data, test_data, gpu_aug=N
+                 outputs = model(images)
+                 _, predicted = torch.max(outputs.data, 1)
+                 loss = criterion(outputs, labels)
++                if hasattr(model, 'aux_loss'):   # model-as-firmware patch: e.g. FFF hardening loss
++                    loss = loss + model.aux_loss()
+                 if epoch < hyperparameters['prune_epoch']:
+                     loss += add_mask_regularization(model, hyperparameters["lambda_l1"])
+                 loss.backward()
+@@ -290,6 +294,8 @@ def train_model(model, device, hyperparameters, train_data, test_data, gpu_aug=N
+                 outputs = model(images)
+                 _, predicted = torch.max(outputs.data, 1)
+                 loss = criterion(outputs, labels)
++                if hasattr(model, 'aux_loss'):   # model-as-firmware patch: e.g. FFF hardening loss
++                    loss = loss + model.aux_loss()
+                 if epoch < hyperparameters['prune_epoch']:
+                     loss += add_mask_regularization(model, hyperparameters["lambda_l1"])
+                 loss.backward()
+@@ -368,7 +374,7 @@ def train_model(model, device, hyperparameters, train_data, test_data, gpu_aug=N
+         if epoch + 1 == num_epochs:
+             print(f'best test accuracy {best_testaccuracy:.2f}% at epoch {best_epoch} (modeldata/{runname}_best.pth)')
+ 
+-        print(f'Epoch [{epoch+1}/{num_epochs}], LTrain:{np.mean(train_loss):.6f} ATrain: {trainaccuracy:.2f}% LTest:{np.mean(test_loss):.6f} ATest: {correct / total * 100:.2f}% Time[s]: {epoch_time:.2f} Act: {activity*100:.1f}% w_clip/entropy[bits]: ' + clip_info)
++        print(f'Epoch [{epoch+1}/{num_epochs}], LTrain:{np.mean(train_loss):.6f} ATrain: {trainaccuracy:.2f}% LTest:{np.mean(test_loss):.6f} ATest: {correct / total * 100:.2f}% Time[s]: {epoch_time:.2f} Act: {activity*100:.1f}% w_clip/entropy[bits]: ' + clip_info + (f' FFF {model.fff_info()}' if hasattr(model, 'fff_info') else ''))
+ 
+         writer.add_scalar('Loss/train', np.mean(train_loss), epoch+1)
+         writer.add_scalar('Accuracy/train', trainaccuracy, epoch+1)

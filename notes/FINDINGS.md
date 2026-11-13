@@ -434,6 +434,51 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - Whole model, one core, SRAM: fc1 as code with fc2/fc3 dense is 3.56 ms, equal to the hybrid with everything as code (3.56 ms), and its binary is 24 KB smaller (136.8 against 160.8 KB).
 - **Meaning:** the right format depends on the weight type. Ternary: code (zeros become speed, F16). int4: dense or code (a tie). int8: dense in SRAM; in flash builds, code in SRAM if there is room, otherwise streamed. mafc's general advantage on int8 layers is small; its large wins are the conv kernels (F5) and weights with many zeros (F17).
 
+### F25. Idea B: a tree layer reads 6.6x fewer weights and runs 3.8-6.2x faster than its dense twin, for 0.30 points of accuracy (keep)
+- **Model `fff80`:** tern80 with its fc1 + fc2 block (320 → 96 → 64) replaced by a fast feedforward tree (Belcak & Wattenhofer 2023) of the same training width.
+  - Depth 3: 7 routing nodes (one int8 neuron each, no bias) choose one of 8 leaves.
+  - Each leaf is 320 → 12 (ternary) → relu_norm → 64 (int4), like fc1 and fc2. 8 × 12 = 96, so tern80 is the dense twin.
+  - Inference: at each node go right if `nodes[k] · x >= 0`; only the reached leaf is computed.
+  - Weights read per inference: 3 × 320 (nodes) + 12 × 320 + 64 × 12 = **5,568, against 36,864** for fc1 + fc2: **6.6x fewer**. Stored: 39,104 against 36,864 (+6%, the nodes).
+- **Training** (BitNetMCU patch: `FFFLayer`, `CNNMNIST_FFF`; config `train/configs/fff_cnn80.yaml`):
+  - Soft routing: the output mixes all leaves, weighted by the path probabilities (products of node sigmoids).
+  - A hardening loss (the mean entropy of the node decisions) ramps up over 10 epochs.
+  - From epoch 40: hard routing with a straight-through estimator, so training matches inference.
+  - **The first run collapsed:** hardening alone sent every image to one leaf (all node logits large and positive), the cheapest way to make every decision confident. Hard test accuracy hovered at 84–95%, from one 12-neuron leaf.
+  - **Fix: a load-balancing loss**, KL(mean leaf probability over the batch ‖ uniform), as in mixture-of-experts models.
+  - Result: 99.15% final (99.19% best), against tern80's 99.45%: **−0.30 points**. The integer pipeline agrees with PyTorch on 99.88% of images (tern80: 99.98%); a few routing decisions flip with the integer requantization.
+  - Test images use the 8 leaves evenly (10.9–13.8% each). Each leaf specialises in 2–3 digits (e.g. one leaf takes 94% of the 0s, another the 7s and 9s); per-leaf accuracy is 98.5–99.6%.
+- **Compiler:** a new IR op `fff` (reference semantics in `interp.py`, an independent numpy golden model `GoldenFFF`, an interval bound).
+  - Routing: int8 dot products with `SMLAD` on the widened input.
+  - Leaves: each leaf's two layers are emitted by the ordinary linear emitters in the format chosen for their weight type (`--ternary`, `--int4`), one function per leaf, called through a table.
+  - Dense leaves share one int16 copy of their input. Packed int4 needs widths divisible by 8, so the 12-neuron leaves use `--int4 code` or `dense`.
+  - Checks: 7 variants bit-exact on the PC (10k images), 14 board finals bit-exact (10k images).
+
+  | Replaced layers, one core (cycles) | Dense twin: fc1 + fc2 | Tree (`fff` stage) | Speedup |
+  |---|---|---|---|
+  | SRAM, code (fc1 code, fc2 dense) | 67.2k | 17.5k | **3.8x** |
+  | SRAM, dense | 94.2k | 22.3k | **4.2x** |
+  | Flash, code (code in SRAM, int4 dense in flash) | 109.1k | 32.5k | **3.4x** |
+  | Flash, dense | 645k | 103k | **6.2x** |
+
+  | Whole model (10k images) | Dense twin (tern80) | Tree (fff80) |
+  |---|---|---|
+  | One core, SRAM, best (twin: code + code; tree: code + dense) | 3.56 ms | **3.23 ms** (4.50x CMSIS-NN) |
+  | One core, SRAM, dense | 3.73 ms | 3.26 ms |
+  | One core, flash, dense | 8.05 ms, 45.0 KB read from flash | **4.09 ms, 10.7 KB** |
+  | One core, flash, fc1/leaf-in as code | 4.11 ms | 3.45 ms |
+  | Two cores, SRAM (twin: hybrid code + code; tree: code + dense, tree on core 0) | 1.99 ms | **1.86 ms** (7.79x CMSIS-NN) |
+  | Two cores, flash (same formats) | 2.28 ms | 2.57 ms* |
+
+  \* The tree's int4 layers (leaf out, fc3) were dense in flash here, while the twin had every linear layer as code in SRAM (1.3 KB read from flash against 6.3 KB). It is a format difference, not a tree effect; tree + code + code from flash was not measured.
+
+- **Keep criterion** (HANDOFF: ≥3x fewer bytes and lower latency for the tree layers, <1 point accuracy loss): **met.** 6.6x fewer weights read, 3.4–6.2x faster, −0.30 points.
+- **Reading:**
+  - For MNIST the whole-model gain is small from SRAM (9%), because fc1 + fc2 were only about 13% of the time; the conv stack dominates.
+  - Where weights come from flash, the tree halves the whole model (8.05 → 4.09 ms) without moving anything to SRAM (12.9 KB of RAM). The bytes it skips are the bytes that cost.
+  - That is the case idea B is for: models whose feedforward weights don't fit in SRAM, where flash traffic sets the speed (F22). The next test is the tiny story model (HANDOFF section 7), where feedforward layers dominate.
+  - Training needs care: without load balancing the tree collapses silently, and the soft-phase accuracy hides it (hard routing must be what is evaluated).
+
 ## Gate 1
 
 **Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images), mafc is faster than CMSIS-NN in every like-for-like setup:
@@ -453,6 +498,7 @@ Scope (F5, F17):
 |---|---|---|
 | Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b). Tooling ready: firmware command `L`, `harness/energy.py`, `measure.sh energy` | Waiting for cable |
 | Bytes actually read from flash per inference | F22: measured with the XIP counters for every flash build (`flash_read_kb`): hybrid 1.2 KB, CMSIS-NN 45.5 KB | Done |
+| Idea B: tree over neurons (fast feedforward) | F25: depth-3 tree in place of fc1 + fc2: 6.6x fewer weights read, 3.8–6.2x faster for those layers, −0.30 points (99.15%); keep. Needs load balancing in training. Next: the tiny story model | Done for MNIST |
 | Idea C: DMA streaming of weights | F21: the stream FIFO with double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. F23: in the compiler (`--stream`), the 30 KB fc1 runs 29% faster on one core and 58% faster than two cores sharing the cache | Done |
 | How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |

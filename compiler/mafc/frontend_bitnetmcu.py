@@ -16,6 +16,39 @@ sys.path.insert(0, str(ROOT / 'harness'))
 from golden import QUANT_NAMES, decode_fc, parse_header  # noqa: E402
 
 
+def load_fff(npz):
+    """Idea B: a CNNMNIST_FFF model exported by train/export_fff.py (.npz of integer codes) -> mafc IR."""
+    z = np.load(npz)
+    k1 = z['conv1']
+    c, s = k1.shape[0], 16
+    d, L = int(z['depth']), int(z['leaf'])
+    q = {str(k)[:-6]: str(z[k]) for k in z.files if k.endswith('_quant')}
+    nodes = [Node('input', 'input', (1, s, s), (1, s, s), 'int8')]
+    nodes.append(Node('conv1', 'conv3x3', (1, s, s), (c, s - 2, s - 2), 'int32', {'mode': 'broadcast', 'shift': 4}, k1))
+    s -= 2
+    nodes.append(Node('dw1', 'conv3x3', (c, s, s), (c, s - 2, s - 2), 'int32', {'mode': 'depthwise', 'shift': 4}, z['dw1']))
+    s -= 2
+    nodes.append(Node('pool1', 'maxpool2', (c, s, s), (c, s // 2, s // 2), 'int32'))
+    s //= 2
+    nodes.append(Node('dw2', 'conv3x3', (c, s, s), (c, s - 2, s - 2), 'int32', {'mode': 'depthwise', 'shift': 4}, z['dw2']))
+    s -= 2
+    nodes.append(Node('pool2', 'maxpool2', (c, s, s), (c, s // 2, s // 2), 'int32'))
+    s //= 2
+    n_feat = c * s * s
+    n_out = z['leaf_out'].shape[1]
+    nodes.append(Node('norm0', 'relu_norm', (c, s, s), (n_feat,), 'int8'))
+    nodes.append(Node('fff', 'fff', (n_feat,), (n_out,), 'int32',
+                      {'depth': d, 'leaf': L, 'quant_nodes': q['nodes'], 'quant_in': q['leaf_in'], 'quant_out': q['leaf_out']},
+                      tensors={k: z[k].astype(np.int64) for k in ('nodes', 'leaf_in', 'leaf_out')}))
+    nodes.append(Node('norm2', 'relu_norm', (n_out,), (n_out,), 'int8'))
+    nodes.append(Node('fc3', 'linear', (n_out,), (z['fc3'].shape[0],), 'int32', {'quant': q['fc3']}, z['fc3']))
+    nodes.append(Node('argmax', 'argmax', (z['fc3'].shape[0],), (), 'int32'))
+    for nd in nodes:
+        if nd.weights is not None:
+            nd.weights = nd.weights.astype(np.int64)
+    return Graph(Path(npz).stem, nodes).check()
+
+
 def load(header):
     d, a = parse_header(header)
     text = Path(header).read_text()

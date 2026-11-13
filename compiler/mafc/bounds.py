@@ -44,6 +44,18 @@ def bounds(graph):
             acc = np.maximum(np.abs(a), np.abs(b)).sum(axis=1)
             out[nd.name] = (int(s_lo.min()), int(s_hi.max()), int(acc.max()))
             lo, hi = np.int64(s_lo.min()), np.int64(s_hi.max())
+        elif nd.op == 'fff':
+            # every leaf is possible: the union over leaves; leaf inputs are relu_norm outputs, 0..127
+            l, h = int(np.min(lo)), int(np.max(hi))
+            acc = 0
+            for key, (al, ah) in (('nodes', (l, h)), ('leaf_in', (l, h)), ('leaf_out', (0, 127))):
+                w = nd.tensors[key].astype(np.int64)
+                acc = max(acc, int((np.maximum(np.abs(w * al), np.abs(w * ah))).sum(axis=-1).max()))
+            w = nd.tensors['leaf_out'].astype(np.int64)
+            s_lo = (np.minimum(w * 0, w * 127)).sum(axis=-1)
+            s_hi = (np.maximum(w * 0, w * 127)).sum(axis=-1)
+            out[nd.name] = (int(s_lo.min()), int(s_hi.max()), acc)
+            lo, hi = np.int64(s_lo.min()), np.int64(s_hi.max())
         elif nd.op == 'argmax':
             out[nd.name] = out[prev]
         prev = nd.name

@@ -78,3 +78,17 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-12 22:19,mafc_v0_simd_dense_ram,tern80,pico,10000,99.47,100.0,99.98,4.034,605120,604967,605484,150,73.58,77.4,0.0,,"dense kernel: 4 rows, sxtb16 ror folded"
 2026-11-12 22:21,mafc_v0_simd_code_i4dense_ram,tern80,pico,10000,99.47,100.0,99.98,3.557,533502,533342,533867,150,136.79,140.3,0.0,,"dense kernel: 4 rows, sxtb16 ror folded"
 2026-11-12 22:23,mafc_v1_dual_simd_dense_stream,tern80,pico,10000,99.47,100.0,99.98,3.991,598575,592602,720840,150,75.85,19.79,4.42,,"dense kernel: 4 rows, sxtb16 ror folded"
+2026-11-13 00:31,mafc_v0_simd_code_i4code_ram,fff80,pico,10000,99.15,100.0,99.88,3.236,485413,484368,487274,150,139.05,142.93,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:33,mafc_v0_simd_code_i4dense_ram,fff80,pico,10000,99.15,100.0,99.88,3.226,483847,482815,485677,150,116.84,120.87,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:34,mafc_v0_simd_dense_i4dense_ram,fff80,pico,10000,99.15,100.0,99.88,3.256,488355,488249,488864,150,82.71,86.75,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:37,mafc_v0_simd_code_i4code_ram,tern80,pico,10000,99.47,100.0,99.98,3.555,533271,533192,533710,150,161.09,164.29,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:39,mafc_v0_simd_code_i4dense_ram,tern80,pico,10000,99.47,100.0,99.98,3.556,533421,533342,533868,150,136.79,140.3,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:40,mafc_v0_simd_dense_i4dense_ram,tern80,pico,10000,99.47,100.0,99.98,3.733,559887,559808,560336,150,77.59,81.72,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:42,mafc_v0_simd_code_i4dense,fff80,pico,10000,99.15,100.0,99.88,3.451,517594,505521,589154,150,116.95,78.48,4.01,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:44,mafc_v0_simd_dense_i4dense,fff80,pico,10000,99.15,100.0,99.88,4.088,613135,563610,657895,150,82.82,12.89,10.7,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:47,mafc_v0_simd_code_i4dense,tern80,pico,10000,99.47,100.0,99.98,4.111,616706,611384,727844,150,136.91,101.79,6.97,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:49,mafc_v0_simd_dense_i4dense,tern80,pico,10000,99.47,100.0,99.98,8.05,1207495,1200389,1223081,150,77.7,12.99,45.03,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:51,mafc_v1_dual_simd_code_i4dense_ram,fff80,pico,10000,99.15,100.0,99.88,1.863,279519,278032,280949,150,118.39,123.96,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:53,mafc_v1_dual_simd_code_i4code_ram,tern80,pico,10000,99.47,100.0,99.98,1.994,299109,298014,299724,150,156.68,161.42,0.0,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:55,mafc_v1_dual_simd_code_i4dense,fff80,pico,10000,99.15,100.0,99.88,2.574,386092,369171,470585,150,118.52,80.02,6.28,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-13 00:57,mafc_v1_dual_simd_code_i4code,tern80,pico,10000,99.47,100.0,99.98,2.278,341669,339114,434260,150,156.82,129.19,1.31,,idea B: tree (fff80) vs dense twin (tern80)
