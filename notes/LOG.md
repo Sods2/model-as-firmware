@@ -2,6 +2,14 @@
 
 Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
+## 13 Nov 2026 (later): Debug Probe and power meter checked
+
+- **Debug Probe works:** it enumerates as CMSIS-DAP v2 (2E8A:000C) with its UART on COM4. OpenOCD (`~/.pico-sdk/openocd/0.12.0+dev`) connects over SWD at 5 MHz and finds both Cortex-M33 cores (DPIDR 0x4c013477). Its firmware was updated from 1.0.1 to debugprobe v2.3.1, which removes OpenOCD's slow workaround. See [pico-toolchain.md](pico-toolchain.md).
+- **USB extension:** passive. The Pico and the probe sit on root-hub ports 5 and 6, and the board answers on COM3 through the extension and the meter.
+- **Power meter (KOWSI USB-C tester) can't resolve the Pico 2:** with the probe's SWD cable attached it read 0.003 A / 0.014 W idle and 0.004 A / 0.019 W during the `L` loop (tern80 `_prof` build, 7.97 ms per inference). With the SWD cable unplugged it read 0.000 A / 0.000 W while the board was demonstrably running and talking over USB through it; in a longer retest (30 s idle, 60 s busy) the highest reading was again 0.004 A / 0.019 W. So the probe's ground is not what hides the current: the meter just jumps between 0 and 4 mA. Its readings sit at the floor of its range (1 mA, 1 mW and 1 mWh steps), so neither absolute power nor the idle-to-busy difference can be trusted. Step 2b needs a finer instrument (an INA226-type shunt monitor or a Nordic PPK2).
+- **Flashing switched to SWD:** new `harness/flash.sh`, sourced by `measure.sh` and `phase0_matrix.sh`. It programs the `.elf` with OpenOCD, verifies it, runs `cold_reset` and waits until the board answers `?`; if SWD fails it falls back to picotool. A plain OpenOCD `reset` left COM3 dead (USB never re-enumerated); `cold_reset` fixes it. 3–4 s per build. Checked on flash and RAM builds of ref_c, mafc and CMSIS-NN, the fallback with SWD disabled, and `measure.sh profile` end to end (tern80 dense and fff80 two-core code, both 200/200 bit-exact, fff80 at 1.855 ms as before).
+- Precaution kept for a finer instrument: unplug the probe's SWD cable for energy runs, since its ground is a second return path.
+
 ## 13 Nov 2026: idea B, a fast feedforward tree in place of fc1 + fc2
 
 - Read the FFF paper (arXiv 2308.14711): single-neuron sigmoid nodes route to one of 2^d leaves; soft mixture plus an entropy "hardening" loss in training, hard routing at inference. On plain MNIST MLPs it lost about 3 points.

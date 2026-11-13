@@ -10,22 +10,12 @@ MODE=${1:-final}
 PORT=${PORT:-COM3}
 P=~/.pico-sdk
 export PATH="$P/cmake/v4.3.4/bin:$P/ninja/v1.13.2:$P/toolchain/15_2_Rel1/bin:$PATH"
-PT=$P/picotool/2.3.1/picotool/picotool.exe
 PY=train/.venv/Scripts/python.exe
 
 if [ "$MODE" = profile ]; then N=200; PROF=ON; CSV=results/profile.csv; SUFFIX=-prof
 else N=10000; PROF=OFF; CSV=results/phase0.csv; SUFFIX=; fi
 
-wait_port() { for _ in $(seq 1 20); do $PY -m serial.tools.list_ports | grep -q "$PORT" && { sleep 1; return 0; }; sleep 1; done; echo "board did not come back on $PORT"; return 1; }
-flash() {
-  # -f reboots the running firmware into BOOTSEL; Windows is sometimes too slow to see it, so retry once without -f
-  if ! "$PT" load -f -x "$1" >/dev/null 2>&1; then
-    local ok=0
-    for _ in 1 2 3 4 5; do sleep 2; "$PT" load -x "$1" >/dev/null 2>&1 && { ok=1; break; }; done
-    [ $ok = 1 ] || { echo "flashing $1 failed"; return 1; }
-  fi
-  wait_port
-}
+. harness/flash.sh   # flash(): SWD via the Debug Probe, picotool fallback (FLASH=auto|swd|usb)
 
 # build model mem golden
 run() {
