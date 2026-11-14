@@ -2,6 +2,23 @@
 
 *Nov 3, 2026 · also kept as a [Claude Doc]((private link removed))*
 
+> **Corrections from measurement (added 14 Nov 2026).** This study was written before any measurement and is kept as written. Where later results contradict it, they win:
+>
+> - **Atome's speed is not limited by flash on the Pico 2** (contrary to "What already exists" and idea G's motivation).
+>   - It is compute-bound: from SRAM it is only 10% faster.
+>   - Its engine recomputes the whole context for every token and spends ~17 cycles per weight.
+>   - It reads 1.3 MB from flash per token, not ~270 KB.
+>   - Flash does matter once the engine is efficient: our dense story model is 3.1x slower from flash than from SRAM (notes/lm.md).
+> - **Weights as code cost about 5.6–6 bytes per non-zero weight, not 2–4** (FINDINGS F16, F17). The code-size estimates below are about 2x too low.
+> - **The hybrid that won (F20) is different from the one proposed here.** The linear layers, whose weights are used once per inference, become code in SRAM. The conv weights, which are reused, stay as data.
+> - **Not every compute unit is used yet:** both cores, SIMD/DSP and DMA are; PIO isn't.
+> - **Energy has not been measured.** The USB power meter can't resolve the Pico 2 (0–4 mA in 1 mA steps); it needs an INA226 breakout or a Nordic PPK2.
+> - **Fast feedforward speedups are much smaller here than the published 78x / 220x,** which are for the feedforward layers alone on large models:
+>   - MNIST tree layer: 3.4–6.2x (F25).
+>   - Story model: the feedforward stage about 5–6x, the whole token 1.7–2.5x (F26).
+> - **"Phase 3 has largely been done already" (Atome) was too strong.** Atome has no feedforward layer for idea B, and its engine is not a strong baseline. Phase 3 trained its own model. The controlled language-model result is the dense/tree twin comparison; there is no strong external language-model baseline (notes/lm.md, "Fairness of the Atome comparison").
+> - **Phase 3's target ("beat Atome's ~1 tok/s") was met** with a different model and a different engine, so it is not a like-for-like result.
+
 ## Verdict
 
 **Feasible as a proof of concept, with one honest caveat.** You can build a board whose firmware *is* the model: no OS, no runtime, no model file, weights compiled straight into machine instructions, and every compute unit on the chip used. People are already running language models bare-metal on Raspberry Pi 4, Pi 5 and even four Pi Zeros wired together, so the foundation is proven.

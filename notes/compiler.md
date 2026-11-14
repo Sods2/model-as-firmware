@@ -119,7 +119,7 @@ Loops in the disassembly (`ref_infer`, RAM profile ELFs; `harness/asm_loops.py` 
 | SMLAD dw1 (2 outputs) | 48 instr, 2 IT | 36, branch-free |
 | SMLAD dw2 (4 outputs) | 95 instr, 7 IT | 69, branch-free |
 
-Measured (stage cycles, one core, SRAM): SMLAD build conv1 522k → 451k, dw1 320k → 273k, dw2 35k → 34k; v0 conv1 466k → 460k, dw1 450k → 360k, dw2 53k → 45k. Whole model (10k images, SRAM): v0 8.83 → 8.18 ms, v1 two cores 4.80 → 4.53 ms, v0 + SMLAD 8.29 → 7.44 ms, **v1 + SMLAD two cores 4.36 → 4.23 ms (3.44x faster than CMSIS-NN)**. All numbers are in `results/README.md` and FINDINGS F14.
+Measured (stage cycles, one core, SRAM): SMLAD build conv1 522k → 451k, dw1 320k → 273k, dw2 35k → 34k; v0 conv1 466k → 460k, dw1 450k → 360k, dw2 53k → 45k. Whole model (10k images, SRAM): v0 8.83 → 8.18 ms, v1 two cores 4.80 → 4.53 ms, v0 + SMLAD 8.29 → 7.44 ms, **v1 + SMLAD two cores 4.36 → 4.23 ms (3.44x faster than CMSIS-NN on one core)**. All numbers are in `results/README.md` and FINDINGS F14.
 
 Lesson: the select form cost far more than its own instructions; it changed register allocation and scheduling of whole loops. That's also most of the old v0 dw1 regression (F6). Check branch and IT counts in the hot loops after every back-end change.
 
@@ -156,7 +156,7 @@ Whole model, 10k images, bit-exact (tern80 on the board; all 6 SIMD variants on 
 | Build | flash | SRAM |
 |---|---|---|
 | v0 + SMLAD | 8.11 → 5.97 ms | 7.44 → 5.23 ms |
-| v1 + SMLAD, two cores | 5.40 → 4.38 ms | **4.23 → 3.05 ms (4.76x CMSIS-NN)** |
+| v1 + SMLAD, two cores | 5.40 → 4.38 ms | **4.23 → 3.05 ms (4.76x one-core CMSIS-NN)** |
 
 Two-core SRAM profile now: conv1 128k (28%), dw1 94k (20%), pool1 23k, dw2 13k, join 25k, **fc1 139k (30%)**, fc2 32k, fc3 7k. **Next: fc1** (weight formats, then weights as code, idea A).
 
@@ -183,7 +183,7 @@ The code format scales with sparsity (two cores, SRAM): fc1 28k (tern80, 50% zer
 What gcc does with the code format: it loads each of the 320 inputs once (`ldrsb`) at the start and keeps most of them in a 1.5 KB stack frame. Each row then becomes `ldr` from the stack + `add`/`sub` per nonzero. That is about 2 instructions per nonzero, measured at about 3.3 cycles. Ideas to go further: SIMD sums of byte groups shared by several rows, or common-subexpression sharing between rows (idea A's "shared partial sums").
 
 Two-core SRAM profile with fc1 as code: conv1 127k (36%), dw1 94k (27%), pool1 23k, dw2 13k, join 24k, fc1 28k, fc2 33k, fc3 7k; 2.32 ms. **Next candidates:**
-- Rebalance the channel split: core 0 waits about 24k cycles for core 1, because core 1 does its conv half plus the FIFO handshake.
+- Rebalance the channel split: core 0 waits about 24k cycles for core 1, because core 1 does its conv half plus the FIFO handshake. *(Later found to be mostly a worse-compiled inlined copy of the kernel on core 1; fixed with a shared `noinline` kernel, F19.)*
 - fc2 as code or SMLAD (int4, 6,144 weights).
 - pool1.
 

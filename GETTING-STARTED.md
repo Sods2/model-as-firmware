@@ -64,7 +64,7 @@ Setup B also needs a microSD card and power supply for the Pi 4 (items 7–8, if
 | 1 | Toolchain: VS Code **"Raspberry Pi Pico"** extension. It installs the Pico SDK, arm-none-eabi-gcc, CMake, Ninja, picotool and OpenOCD. Board = `pico2`. | It builds its own blink example. |
 | 2 | Bring-up firmware `firmware/rp2350/hello/`: LED blink + `stdio_usb` printing "hello" + a cycle-counter timing of a fixed loop. Flash it via BOOTSEL. | LED blinks. The COM port prints hello and timings. `picotool info` reads the board. |
 | 2b | Meter sanity check: idle vs busy-loop for 60 s each. Record the meter's resolution. | Busy minus idle gives a stable mWh difference across 3 runs. |
-| 3 | `train/`: Python 3.12 venv with PyTorch (CUDA). Clone BitNetMCU and train its ternary MNIST model. Also train variants with ~70% and ~90% zero weights. | Accuracy matches BitNetMCU's reported numbers. Weights exported. |
+| 3 | `train/`: Python 3.12 venv with PyTorch (CUDA). Clone BitNetMCU and train its ternary MNIST model. Also train variants with ~70% and ~90% zero weights. | Accuracy close to BitNetMCU's reported numbers (99.45% final vs 99.52% reported; one seed). Weights exported. |
 | 4 | `firmware/baselines/ref_c/`: plain-C inference with packed weights (ternary fc1). | Logits identical to the integer golden model (`harness/golden.py`) on every test image. Prediction agreement with PyTorch logged. *(Revised 11 Nov: the board does integer arithmetic, so 100% agreement with float PyTorch isn't a meaningful target. See `harness/README.md`.)* |
 | 5 | `firmware/baselines/cmsis_nn/`: int8 CMSIS-NN build of the same network. | Runs, bit-exact with its own golden model, and its accuracy is logged. |
 | 6 | `harness/`: Python script (pyserial) that sends test images over the COM port, reads class and cycles, compares with PyTorch, and writes a CSV to `results/` using the HANDOFF §6 metric columns. | **Gate 0:** both builds are bit-exact with their golden models, and both have their numbers logged. Energy (step 2b) to be added. |
@@ -86,7 +86,7 @@ Repo layout follows HANDOFF §10: `train/ compiler/ firmware/rp2350/ firmware/ba
   - Plain-C reference: 99.47% accuracy, 99.98% agreement with PyTorch, 10.21 ms per image from flash and 9.52 ms from SRAM.
   - CMSIS-NN int8, same weights: 99.44%, 18.70 ms from flash and 14.52 ms from SRAM. **14.52 ms is the speed bar for Gate 1.**
   - CMSIS-NN's int8 fc1 runs 7.4x faster from SRAM than from flash (its weights overflow the 16 KB XIP cache). The packed ternary weights fit.
-- **Still to do for Gate 0:** step 2b (energy per inference) once the cable arrives, then add `energy_mj` to the results.
+- **Still to do for Gate 0:** step 2b (energy per inference), then add `energy_mj` to the results. *(Update 13 Nov: the cable and the Debug Probe arrived, but the USB meter reads only 0–4 mA in 1 mA steps for the Pico 2, which is too coarse. Step 2b needs an INA226 breakout or a Nordic PPK2.)*
 
 ## 3. Open items
 - Exact Pi 4 RAM and whether you have a microSD card and power supply for it. This only matters for Setup B or the later Pi phase.

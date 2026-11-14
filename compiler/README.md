@@ -1,6 +1,6 @@
 # compiler/: mafc, the model-as-firmware compiler
 
-Turns a trained model into firmware source for one target. Phase 1, v0.
+Turns a trained model into firmware source for one target. Phase 1 (MNIST): v0, then v1 (two cores, SMLAD, weights as code, streaming). The Phase 3 story-model back end is `compile_lm.py` (notes/lm.md).
 
 ```
 train/export/<model>.h ──front end──► IR (integer ops + integer weight codes) ──back end──► gen/mafc_<model>.c
@@ -16,6 +16,7 @@ train/export/<model>.h ──front end──► IR (integer ops + integer weight
 | `mafc/interp.py` | Numpy interpreter of the IR, the definition of "correct" for every back end |
 | `mafc/backend_rp2350_c.py` | IR -> C for the RP2350. Implements `ref_infer()` so the Phase 0 harness and firmware apply unchanged |
 | `compile.py` | Command line |
+| `mafc/lm_backend.py`, `compile_lm.py` | MafLM (Phase 3 language model): integer `.npz` (from `train/lm/intref.py --npz`) -> packed C data for `firmware/rp2350/maflm` (see notes/lm.md) |
 
 ## Use
 
@@ -76,7 +77,7 @@ Numbers: FINDINGS F16.
 `compile.py --int4 {packed,code,dense}` sets the format of int4sym layers (fc2, fc3). The file suffix is `_i4<format>`; build with `-DINT4=<format>`, or give it as the 5th field in `measure.sh` (`mafc2_s:tern80:ram:code:code`).
 
 - **packed** (default): 8 weights per uint32 and a decode loop.
-- **code:** per row, sums grouped by weight magnitude, one multiply per group; placed in SRAM. About 3.4x faster than packed, and level with CMSIS-NN.
+- **code:** per row, sums grouped by weight magnitude, one multiply per group; placed in SRAM. About 3.4x faster than packed. Against CMSIS-NN: fc2 is level (0.96x), fc3 is 0.71x. Since F24, the 4-row dense format beats code for fc2.
 - **dense:** int8 weights with `SXTB16`/`SMLAD` (needs `--simd`).
 
 Numbers: FINDINGS F18.
@@ -105,4 +106,4 @@ In two-core builds the SMLAD conv kernel is `noinline`, so both cores run one co
 
 - Front end: the BitNetMCU CNNMNIST header layout only. A QONNX or `.pth` front end comes later.
 - Back end: 1x16x16 int8 input, a per-channel conv prefix, and a `linear -> 10` + `argmax` end. These match the harness protocol.
-- SIMD covers the convs only. Weights as code (idea A) covers the linear layers (ternary and int4); conv weights are still data. See `notes/compiler.md`.
+- SIMD covers the convs, the dense linear format and the tree routing. Weights as code (idea A) covers the linear layers (ternary and int4); conv weights are still data. See `notes/compiler.md`.

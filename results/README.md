@@ -7,6 +7,20 @@
 | `profile.csv`, `profile_stages.csv` | Profiling builds (200 images, stage counters on). Stage cycles are for test image 0 |
 | `profile_stages_dual.csv` | The same for dual-core builds (extra `join` stage: core 0 waiting for core 1) |
 | `contention.csv`, `contention_stages.csv`, `contention_stages_dual.csv` | Core-contention test: mafc v0 and v1 profiling builds, flash and SRAM, 2 repeats each. Analyse with `harness/contention.py` (notes/FINDINGS.md F12) |
+| `bench_conv.csv` | Wide-conv microbenchmark: ternary-as-code vs CMSIS-NN on one synthetic layer with random weights (F17) |
+| `bench_stream.csv` | DMA streaming benchmark (F21) |
+| `profile_fff_stages.csv` | Stage cycles for the idea B tree model (F25) |
+| `phase3.csv` | Phase 3 story models on the Pico 2: Atome's engine and MafLM builds, ms/token over the first 24 positions and the whole window (notes/lm.md, F26) |
+| `atome_ref_seq24.json` | Atome on the PC: bits/byte at several windows and its greedy text (`train/atome/ref.py`) |
+
+**How to read the comparisons (fairness review, 14 Nov 2026):**
+- "vs CMSIS-NN (same memory)†" means against CMSIS-NN built for the same place (flash or SRAM). It is not always the same conditions:
+  - Two-core rows are compared with CMSIS-NN on its one core.
+  - Rows marked "linear in SRAM" / "fc1 in SRAM" keep those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM).
+- The like-for-like figure is one core against one core, both from SRAM: **4.08x** (3.56 vs 14.52 ms).
+- The CMSIS-NN ratios here use its int8 build. With its 4-bit kernel for fc1 (`cmsis_nn_s4fc1*` rows in `phase0.csv`, FINDINGS F27), CMSIS-NN is 7% faster from flash (17.41 ms) and 3% slower from SRAM. So the flash ratios here are about 7% too high, and the SRAM ratios stand.
+- Our fastest builds use more flash than CMSIS-NN (156–161 KB vs 94 KB).
+- Run-to-run spread on repeated builds: ≤0.2% from SRAM, up to 1.2% from flash.
 
 ## Columns (`phase0.csv`)
 
@@ -17,8 +31,8 @@
 | `golden_match_pct` | % of images whose logits equal the golden model's bit for bit. **Must be 100** |
 | `pytorch_agree_pct` | % of images where the prediction equals the PyTorch model's |
 | `latency_ms_mean`, `cycles_*` | `ref_infer()` only, DWT cycle counter at `sys_mhz` |
-| `flash_kb`, `ram_kb` | From `arm-none-eabi-size`: flash = text + data, RAM = data + bss (+ text for `_ram` builds). Stack and heap not included |
-| `flash_read_kb`, `energy_mj` | `flash_read_kb`: filled from 12 Nov 2026 (XIP counters, see below). `energy_mj`: not measured yet; energy runs go to their own file, `energy.csv` (`harness/energy.py`), once the power meter cable arrives |
+| `flash_kb`, `ram_kb` | From `arm-none-eabi-size`: flash = text + data, RAM = data + bss (+ text for `_ram` builds). Stack and heap not included. From 11 Nov 2026 the RAM method changed; see the note at the end |
+| `flash_read_kb`, `energy_mj` | `flash_read_kb`: filled from 12 Nov 2026 (XIP counters, see below). `energy_mj`: not measured yet; energy runs go to their own file, `energy.csv` (`harness/energy.py`), once a meter fine enough for the Pico 2 is available (the USB meter reads 0–4 mA in 1 mA steps) |
 
 ## Phase 0 summary (11 Nov 2026)
 
@@ -42,7 +56,7 @@ All builds are bit-exact with their golden models on all 10,000 test images.
 
 The mafc-generated C. Same integer arithmetic, bit-exact with the golden model on all 10,000 images.
 
-| Build | Model | Accuracy | Latency | vs ref_c | vs CMSIS-NN (same memory) | Flash | RAM |
+| Build | Model | Accuracy | Latency | vs ref_c | vs CMSIS-NN (same memory)† | Flash | RAM |
 |---|---|---|---|---|---|---|---|
 | mafc_v0 (flash) | tern80 | 99.47% | 9.33 ms | 1.09x | 2.00x | 46.4 KB | 7.2 KB |
 | mafc_v0 (SRAM) | tern80 | 99.47% | **8.83 ms** | 1.08x | **1.64x** | 46.3 KB | 53.6 KB |
@@ -53,7 +67,7 @@ Stage profiles are in `profile_stages.csv` (`mafc_v0_prof`, `mafc_v0_ram_prof` r
 
 ### v1: two cores (`mafc_v1_dual`)
 
-| Build | Model | Accuracy | Latency | vs mafc v0 | vs CMSIS-NN (same memory) | Flash | RAM |
+| Build | Model | Accuracy | Latency | vs mafc v0 | vs CMSIS-NN (same memory)† | Flash | RAM |
 |---|---|---|---|---|---|---|---|
 | mafc_v1_dual (flash) | tern80 | 99.47% | 5.80 ms | 1.61x | 3.23x | 49.1 KB | 10.8 KB |
 | mafc_v1_dual (SRAM) | tern80 | 99.47% | **4.80 ms** | 1.84x | **3.02x** | 49.0 KB | 59.8 KB |
@@ -64,7 +78,7 @@ Bit-exact on all 10,000 images. From SRAM the second core gives close to the ide
 
 ### v1 + SMLAD on depthwise convs (`*_simd`)
 
-| Build | Model | Accuracy | Latency | vs same build without SMLAD | vs CMSIS-NN (same memory) | Flash | RAM |
+| Build | Model | Accuracy | Latency | vs same build without SMLAD | vs CMSIS-NN (same memory)† | Flash | RAM |
 |---|---|---|---|---|---|---|---|
 | mafc_v0_simd (flash) | tern80 | 99.47% | 8.93 ms | 1.04x | 2.09x | 48.7 KB | 9.2 KB |
 | mafc_v0_simd (SRAM) | tern80 | 99.47% | 8.29 ms | 1.07x | 1.75x | 48.5 KB | 57.8 KB |
@@ -77,7 +91,7 @@ Bit-exact on all 10,000 images. Analysis in [notes/compiler.md](../notes/compile
 
 The back end now writes the conv ReLU as clamp-then-shift (FINDINGS F14). Same results, faster code. These rows replace the four tables above as the current numbers.
 
-| Build | Before | After | Change | vs CMSIS-NN (same memory) | Flash | RAM |
+| Build | Before | After | Change | vs CMSIS-NN (same memory)† | Flash | RAM |
 |---|---|---|---|---|---|---|
 | mafc_v0 (flash) | 9.33 ms | 8.66 ms | −7.1% | 2.16x | 46.4 KB | 9.2 KB |
 | mafc_v0 (SRAM) | 8.83 ms | 8.18 ms | −7.4% | 1.77x | 46.3 KB | 55.5 KB |
@@ -94,7 +108,7 @@ All tern80, 99.47%, bit-exact on all 10,000 images. Stage profiles (`profile_sta
 
 conv1 now uses SMLAD on a widened int16 copy of the image. The kernel was rewritten so it fits in registers (FINDINGS F15). Only the SIMD builds changed. These rows are the current SIMD numbers.
 
-| Build | Before | After | Change | vs CMSIS-NN (same memory) | Flash | RAM |
+| Build | Before | After | Change | vs CMSIS-NN (same memory)† | Flash | RAM |
 |---|---|---|---|---|---|---|
 | mafc_v0_simd (flash) | 8.11 ms | 5.97 ms | −26.4% | 3.13x | 49.6 KB | 9.7 KB |
 | mafc_v0_simd (SRAM) | 7.44 ms | 5.23 ms | −29.7% | 2.78x | 49.5 KB | 59.3 KB |
@@ -108,7 +122,7 @@ All tern80, 99.47%, bit-exact on all 10,000 images. Stage profiles (20:09 rows),
 
 Build names carry the format (`_sparse`, `_code`, `_dense`; no suffix = base3). Profile rows compare the formats (FINDINGS F16). The code builds were then measured on 10k images. In flash builds the code-format fc1 runs from SRAM (`.time_critical`).
 
-| Build | Before (base3) | fc1 as code | Change | vs CMSIS-NN (same memory) | Flash | RAM* |
+| Build | Before (base3) | fc1 as code | Change | vs CMSIS-NN (same memory)† | Flash | RAM* |
 |---|---|---|---|---|---|---|
 | mafc_v0_simd_code (flash, fc1 in SRAM) | 5.97 ms | 4.11 ms | −31.2% | 4.55x | 132.6 KB | 101.5 KB |
 | mafc_v0_simd_code (SRAM) | 5.23 ms | 3.87 ms | −25.9% | 3.75x | 132.5 KB | 135.7 KB |
@@ -123,7 +137,7 @@ All bit-exact on all 10,000 images. Accuracy: 99.47% for tern80 and z70, 99.51% 
 
 The build names end in `_i4code` / `_i4dense`. Profile rows compare the int4 formats (FINDINGS F18); the code builds were then measured on 10k images.
 
-| Build | Before (fc1 as code) | + fc2/fc3 as code | Change | vs CMSIS-NN (same memory) | Flash | RAM* |
+| Build | Before (fc1 as code) | + fc2/fc3 as code | Change | vs CMSIS-NN (same memory)† | Flash | RAM* |
 |---|---|---|---|---|---|---|
 | mafc_v0_simd_code_i4code (flash, linear in SRAM) | 4.11 ms | 3.59 ms | −12.7% | 5.22x | 160.9 KB | 133.6 KB |
 | mafc_v0_simd_code_i4code (SRAM) | 3.87 ms | 3.56 ms | −8.0% | 4.08x | 160.8 KB | 164.0 KB |
@@ -139,7 +153,7 @@ All bit-exact on all 10,000 images.
 | Build | Before | After | Note |
 |---|---|---|---|
 | **mafc_v1_dual_simd_code_i4code (SRAM)** | 2.15 ms | **1.99 ms** | 7.28x CMSIS-NN; join wait 24k → 24 cycles |
-| mafc_v1_dual_simd_code_i4code (flash) | 2.35 ms | 2.27 ms | 8.23x vs CMSIS-NN from flash |
+| mafc_v1_dual_simd_code_i4code (flash) | 2.35 ms | 2.27 ms | 8.23x vs CMSIS-NN from flash (linear layers in SRAM; 6.4x vs CMSIS-NN from SRAM) |
 | mafc_v1_dual_simd (SRAM) | 3.05 ms | 2.91 ms | all-data |
 | mafc_v1_dual_simd (flash) | 4.38 ms | 4.32 ms | all-data |
 | mafc_v0_simd_code_i4code (SRAM / flash) | 3.56 / 3.59 ms | 3.59 / 3.64 ms | noinline is 1% slower on one core, so one-core builds keep the inline kernel (the earlier rows stand) |
@@ -244,3 +258,12 @@ One 3×3 conv, 10×10×32 → 8×8×32, ternary weights. CMSIS-NN `arm_convolve_
 - The rows labelled "first run" used 3 cases and different random weights.
 
 \* **RAM method changed on 11 Nov 2026 (these rows on).** `ram_kb` is now the sum of every section linked at a main-SRAM address (`arm-none-eabi-size -A`), excluding heap and stacks. Before, it was data + bss (+ text for copy_to_ram builds) from Berkeley `size`. That missed code copied to SRAM in flash builds: the first fc1-as-code flash build showed 9.7 KB instead of 97.5 KB. Compared with the new method, the old one overstated copy_to_ram builds by about 5–6 KB (it counted flash-only boot sections) and understated flash builds by about 2 KB. For example, mafc_v1_dual_simd (SRAM) was 62.9 KB the old way and is 56.3 KB the new way. Older rows were not rewritten.
+
+## Phase 3 summary (13–14 Nov 2026)
+
+Story models on the Pico 2 (`phase3.csv`). The analysis, including the caveats of the Atome comparison, is in [notes/lm.md](../notes/lm.md) and FINDINGS F26.
+
+- **MafLM tree vs dense twin** (two cores, from SRAM), bit-exact on all builds:
+  - first 24 positions: 3.22 vs 6.77 ms/token;
+  - whole 256 window: 4.99 vs 8.56 ms/token.
+- **Atome's own engine** (one core, SRAM, window 24): 1,414 ms/token. It recomputes the whole context for every token, and our tok/s excludes the prompt, while Atome's engine reprocesses it inside every call.

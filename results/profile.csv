@@ -80,3 +80,7 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-13 00:58,mafc_v0_simd_dense_i4dense_ram_prof,tern80,pico,200,100.0,100.0,100.0,3.76,563993,563917,564429,150,77.79,81.93,0.0,,idea B: tree (fff80) vs dense twin (tern80)
 2026-11-13 00:58,mafc_v0_simd_code_i4dense_prof,tern80,pico,200,100.0,100.0,100.0,4.154,623044,619481,726629,150,137.12,101.79,7.35,,idea B: tree (fff80) vs dense twin (tern80)
 2026-11-13 00:59,mafc_v0_simd_dense_i4dense_prof,tern80,pico,200,100.0,100.0,100.0,8.051,1207626,1203008,1224927,150,77.9,12.99,45.21,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-14 10:57,cmsis_nn_s4fc1_prof,tern80,pico,200,100.0,100.0,100.0,17.451,2617702,2609942,2673645,150,80.93,37.79,30.08,,fc1 s4 vs s8 stage profile (14 Nov)
+2026-11-14 10:57,cmsis_nn_s4fc1_ram_prof,tern80,pico,200,100.0,100.0,100.0,14.92,2238014,2237967,2238954,150,80.82,109.77,0.0,,fc1 s4 vs s8 stage profile (14 Nov)
+2026-11-14 10:58,cmsis_nn_prof,tern80,pico,200,100.0,100.0,100.0,18.762,2814257,2807034,2846537,150,94.26,37.79,45.78,,fc1 s4 vs s8 stage profile (14 Nov)
+2026-11-14 10:58,cmsis_nn_ram_prof,tern80,pico,200,100.0,100.0,100.0,14.537,2180614,2180569,2182059,150,94.15,123.1,0.0,,fc1 s4 vs s8 stage profile (14 Nov)

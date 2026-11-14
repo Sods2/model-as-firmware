@@ -52,4 +52,10 @@ git -C BitNetMCU apply ../bitnetmcu.patch
 | int8_80 (all linear int8) | 5% | 99.50% (ep 45) | 99.43% | 99.45% |
 | fff80 (tree, hard routing) | 55% | 99.19% (ep 50) | 99.15% | 99.15% |
 
-Even with 90% of fc1's weights set to zero, accuracy doesn't drop; all the differences are within run-to-run noise. Final-epoch weights are in `models/*.pth`, and the exported C headers are in `export/*.h`. Note that the packed ternary format is a fixed 1.6 bits per weight however many zeros there are, so the size savings will only come from a sparse format in the compiler.
+Even with 90% of fc1's weights set to zero, accuracy doesn't drop. The differences are within the epoch-to-epoch spread of a single run; each configuration was trained once (one seed), so there is no seed study behind this. The "best" column is the best epoch picked on the test set, which is optimistic; the final-epoch numbers are the fair ones, and the exports use the final epoch. Final-epoch weights are in `models/*.pth`, and the exported C headers are in `export/*.h`. Note that the packed ternary format is a fixed 1.6 bits per weight however many zeros there are, so the size savings would have to come from a sparse format in the compiler. *(Measured later: every format tried, sparse lists and code alike, is larger than the 6 KB packed one; zeros buy speed in the code format, not size. FINDINGS F16.)*
+
+## Story models (Phase 3)
+
+- **`lm/`: MafLM, our own ternary byte-level story model** (dense and tree twins), with its trainer, integer reference and overnight script. See [notes/lm.md](../notes/lm.md).
+- **Data:** TinyStories (Eldan & Li, 2023; Hugging Face `roneneldan/TinyStories`), files `TinyStoriesV2-GPT4-train.txt` and `-valid.txt`, in `data/tinystories/` (gitignored). See the dataset card for its licence.
+- **`atome/`: scripts that evaluate Atome LM** (TilelliLab, Apache-2.0 code), cloned to `atome-lm/` (gitignored). The licence of its trained weights is unclear (their NOTICE and README disagree), so neither the weights nor the cloned repo are committed here. `atome/fairness.py` reproduces the fairness table in notes/lm.md.

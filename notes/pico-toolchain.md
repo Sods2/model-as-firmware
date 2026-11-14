@@ -1,6 +1,6 @@
 # Pico 2 toolchain on this PC
 
-*Last checked 11 Nov 2026.*
+*Last checked 13 Nov 2026.*
 
 ## Where things are
 
@@ -13,7 +13,7 @@ Everything comes from the VS Code "Raspberry Pi Pico" extension, under `%USERPRO
 | CMake | `cmake/v4.3.4/bin/cmake.exe` |
 | Ninja | `ninja/v1.13.2/ninja.exe` |
 | picotool | `picotool/2.3.1/picotool/picotool.exe` |
-| OpenOCD | `openocd/` (for when the Debug Probe arrives) |
+| OpenOCD | `openocd/` (used with the Debug Probe for SWD flashing since 13 Nov; `harness/flash.sh`) |
 
 None of these are on PATH by default. The PC also has an old 32-bit MinGW gcc 9.2 at `C:\MinGW\bin\gcc.exe`, which is fine for small host test programs but can't build DLLs for 64-bit Python.
 
@@ -83,7 +83,7 @@ PT=~/.pico-sdk/picotool/2.3.1/picotool/picotool.exe
 
 - **Gotcha:** Python's `open()` on this PC defaults to cp1252, not UTF-8. Scripts that rewrite docs must pass `encoding='utf-8'`, or characters like `–` and `±` get corrupted.
 
-## Measuring flash traffic (open question)
+## Measuring flash traffic (answered 12 Nov)
 
 - **Correction (12 Nov 2026):** the RP2350 *has* XIP cache counters: `xip_ctrl_hw->ctr_hit` and `ctr_acc` (`hardware/structs/xip.h`, registers `XIP_CTR_HIT` / `XIP_CTR_ACC` at `XIP_CTRL_BASE + 0x0c / 0x10`; write to clear). The 11 Nov check that found "none" looked in the wrong header. Misses = acc − hit; times the 8-byte line size, that gives about the bytes fetched through the cache. Uncached and DMA/stream reads are not counted as hits.
 - **Used since 12 Nov 2026:** `pico_main.c` clears and sums the two counters around every `ref_infer()` (command `X`); `run.py` turns them into `flash_read_kb` (FINDINGS F22).

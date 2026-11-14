@@ -15,7 +15,7 @@ CMSIS-NN is self-contained (its own `Internal/arm_nn_compiler.h`) and needs no C
 
 ## Why it's the same network
 
-- **Weights:** the *same integer codes* as the BitNetMCU export: 8-bit convs, ternary fc1, 4-bit fc2/fc3. They're unpacked to int8 because CMSIS-NN only takes int8 weights. fc1 grows from 6.1 KB packed to 30 KB.
+- **Weights:** the *same integer codes* as the BitNetMCU export: 8-bit convs, ternary fc1, 4-bit fc2/fc3. They're unpacked to int8, so fc1 grows from 6.1 KB packed to 30 KB. *(Correction, 14 Nov 2026: CMSIS-NN also has 4-bit packed (s4) kernels at this commit, `arm_fully_connected_s4`, `arm_convolve_s4` and `arm_depthwise_conv_s4`. They weren't used at first: the CMake glob picks `*_s8*` only. Measured since (FINDINGS F27): `-DFC1_S4=ON` runs fc1 with `arm_fully_connected_s4` on the same ternary weights packed two per byte (`harness/export_cmsis_s4.py`). It is bit-exact, 7% faster from flash (17.41 ms) and 3% slower from SRAM (14.92 ms). fc2/fc3 can't use s4: their 4-bit levels are ±1…±15.)*
 - **Activations:** int8, zero point 0. ReLU is fused as a clamp to 0..127, the same range BitNetMCU uses.
 - **Requantization:** one static scale per layer instead of BitNetMCU's per-image power-of-two shift. Since the network has no biases and only ReLU/max-pool (it's positively homogeneous; see [bitnetmcu-integer-inference.md](bitnetmcu-integer-inference.md)), this changes the rounding, not the function.
 - **Calibration:** TFLite-style min/max. Each layer's scale is 127 / max(accumulator) over the first 10,000 MNIST *training* images, computed layer by layer on the already-quantized outputs. The test set is never used.
@@ -38,9 +38,9 @@ CMSIS-NN is self-contained (its own `Internal/arm_nn_compiler.h`) and needs no C
 ## Audit: is this CMSIS-NN at its best? (11 Nov 2026, FINDINGS F17)
 
 - **Compiler flags:** `-O3 -mcpu=cortex-m33 -march=armv8-m.main+fp+dsp`, so `arm_nn_math_types.h` turns on `ARM_MATH_DSP` and the SMLAD paths are used.
-- **dw1/dw2:** `arm_depthwise_conv_wrapper_s8` picks the dedicated `arm_depthwise_conv_3x3_s8` (ch_mult 1, padding ≤ 1, no MVE). That is the fastest depthwise kernel CMSIS-NN has for a DSP-only core. It is still slow here, because it works on NHWC with per-tap 4-channel loads and per-channel requantization.
+- **dw1/dw2:** `arm_depthwise_conv_wrapper_s8` picks the dedicated `arm_depthwise_conv_3x3_s8` (ch_mult 1, padding ≤ 1, no MVE). It is the kernel the library's wrapper selects for a DSP-only core. The alternative `arm_depthwise_conv_s8_opt` was not timed. It is still slow here, because it works on NHWC with per-tap 4-channel loads and per-channel requantization.
 - **conv1:** `arm_convolve_wrapper_s8` falls through to `arm_convolve_s8` (im2col + `arm_nn_mat_mult_kernel_s8_s16`). The 1×1 and 1×N fast paths don't apply to a 3×3 kernel, and there is no special path for one input channel.
-- **Conclusion:** nothing to fix; the baseline uses the library as intended. CMSIS-NN is single-core, so like-for-like comparisons are one core against one core (3.75x).
+- **Conclusion:** nothing to fix; the baseline uses the library as intended. CMSIS-NN is single-core, so like-for-like comparisons are one core against one core (3.75x then; 4.08x after F18). Two caveats on 'nothing to fix': the s4 kernel (above, F27) helps from flash but not from SRAM; and alternative kernels weren't timed.
 - **Wide-conv test:** on a 32→32 channel 3×3 conv, the shape this library is tuned for, CMSIS-NN runs at about 2.1 cycles per MAC (`firmware/bench/conv_wide`).
 
 ## What profiling showed (stage cycles, tern80, image 0)
