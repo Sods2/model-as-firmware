@@ -83,6 +83,13 @@ One inference: conv1 → dw1 → pool1 → dw2 → pool2 (run per channel, split
 
 ## Watch it run
 
+The easiest way in is the test launcher: run `train/.venv/Scripts/python.exe harness/launcher.py` and open http://127.0.0.1:8765. You choose:
+- the test: MNIST digits or the tiny story model;
+- where it runs: the golden model, the PC build, or the board;
+- for the board, keep its current build, or pick any existing build for the launcher to flash first.
+
+It then opens the matching live page, and each page links back. The bridge commands below start one view directly.
+
 A browser view shows what the board computes as each test image goes through it: time per stage, each layer's feature maps, the ternary weights, and the logits against the golden model. From the repo root in Git Bash:
 
 ```bash
@@ -100,6 +107,11 @@ Then open http://127.0.0.1:8765 and stop it with Ctrl+C.
 - **Sharing the board:** while the bridge runs it holds COM3, so stop it before a measurement. It won't start on the board while `run.py`, `measure.sh` or `picotool` is running.
 
 Options and details are in [harness/README.md](harness/README.md#watching-a-run-live).
+
+**The tiny story model** has its own page (`ui/story.html`). Flash a MafLM build and run `bridge.py --target pico --port COM3`, which switches to story mode by itself. Without hardware, use `--task story --target golden --npz train/runs/lm_tree.npz`. You type a prompt and watch the board write the story one byte at a time:
+- each byte is checked bit-exact against the golden model;
+- each byte shows its time on the board, its top candidates and the tree leaf each layer picked;
+- the page also shows time per byte across the 256-byte window, stage shares, and the saved board runs with the fairness note on the Atome comparison.
 
 ## Documents
 

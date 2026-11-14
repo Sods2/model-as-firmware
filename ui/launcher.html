@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model as Firmware — Tests</title>
+<style>
+:root {
+  --bg: #0B0E11; --panel: #12171C; --panel2: #181E24; --line: #242C34; --line2: #343D46;
+  --text: #E7ECF0; --text2: #C3C9CE; --muted: #A0AAB4; --dim: #7D8893;
+  --ok: #3DDC97; --ok-bg: #10261D; --ok-line: #1D4A37;
+  --warn: #F5B544; --warn-line: #5A4618; --bad: #FF7B7B; --bad-bg: #1E1214;
+  --accent: #6CB4FF;
+  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 Inter, system-ui, 'Segoe UI', sans-serif; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px 48px; display: flex; flex-direction: column; gap: 16px; }
+@media (min-width: 700px) { .wrap { padding: 0 24px 48px; } }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0 4px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; color: var(--muted); }
+h1 { margin: 0; font-size: 26px; font-weight: 600; }
+h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.chip { font-family: var(--mono); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--text2); display: inline-flex; gap: 8px; align-items: center; }
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.chip.ok { color: var(--ok); border-color: var(--ok-line); }
+.chip.warn { color: var(--warn); border-color: var(--warn-line); }
+.chip.bad { color: var(--bad); border-color: #6A2E33; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.step { display: flex; align-items: baseline; gap: 10px; }
+.step .n { font-family: var(--mono); font-size: 12px; color: var(--bg); background: var(--text2); border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.card { text-align: left; cursor: pointer; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; color: var(--text); font: inherit; display: flex; flex-direction: column; gap: 6px; min-height: 44px; }
+.card b { font-size: 15px; }
+.card span { font-size: 13px; color: var(--muted); }
+.card[aria-pressed="true"] { border-color: var(--ok); background: #13201C; }
+.card:disabled { opacity: .45; cursor: default; }
+.card:focus-visible, .btn:focus-visible, select:focus-visible, input:focus-visible, .build:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+label.inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+select, input[type=search] { min-height: 44px; border-radius: 8px; border: 1px solid var(--line2); background: var(--panel2); color: var(--text); padding: 0 10px; font: inherit; }
+input[type=search] { flex: 1 1 240px; min-width: 0; }
+.btn { min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--line2); background: var(--panel2); color: var(--text); cursor: pointer; font: inherit; text-decoration: none; display: inline-flex; align-items: center; }
+.btn.primary { background: var(--text); color: var(--bg); border: 0; font-weight: 600; }
+.btn:disabled { opacity: .45; cursor: default; }
+.builds { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.grp { font-size: 12px; color: var(--muted); font-family: var(--mono); letter-spacing: .06em; margin-top: 8px; }
+.build { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; text-align: left; cursor: pointer; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text); font: inherit; min-height: 44px; }
+.build[aria-pressed="true"] { border-color: var(--ok); background: #13201C; }
+.build:disabled { opacity: .5; cursor: default; }
+.build .nm { font-family: var(--mono); font-size: 13px; word-break: break-all; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--text2); }
+.tag.cur { color: var(--ok); border-color: var(--ok-line); }
+.run { border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); background: var(--panel); }
+.run.running { border-color: var(--ok-line); }
+.run.error { border: 2px solid #FF5C5C; background: var(--bad-bg); }
+.run .t { font-weight: 700; }
+pre.log { margin: 0; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); background: var(--bg); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <div class="eyebrow">MODEL AS FIRMWARE</div>
+    <h1>Choose a test</h1>
+  </div>
+  <div class="row">
+    <span id="boardChip" class="chip"><span class="dot"></span><span id="boardText">board: checking…</span></span>
+    <button type="button" class="btn" id="bProbe">Check the board</button>
+  </div>
+</header>
+
+<section id="run" class="run hidden" role="status" aria-live="polite">
+  <div class="row" style="justify-content:space-between">
+    <span><span class="t" id="runState"></span> <span id="runLabel" class="note"></span></span>
+    <span class="row">
+      <a class="btn primary hidden" id="bOpen" href="#">Open the live view</a>
+      <button type="button" class="btn" id="bStop">Stop</button>
+    </span>
+  </div>
+  <span class="note" id="runDetail"></span>
+  <details id="logBox"><summary class="note" style="cursor:pointer">Log</summary><pre class="log" id="log"></pre></details>
+</section>
+
+<section class="panel" aria-labelledby="s1">
+  <div class="step"><span class="n">1</span><h2 id="s1">What to test</h2></div>
+  <div class="cards" id="tests">
+    <button type="button" class="card" data-test="mnist" aria-pressed="false"><b>Digit recognition (MNIST)</b><span>Phase 1. 10,000 test images through the CNN: feature maps, ternary weights, per-stage time, checked against the golden model.</span></button>
+    <button type="button" class="card" data-test="story" aria-pressed="false"><b>Tiny story (MafLM)</b><span>Phase 3. Type a prompt and watch the model write byte by byte: time per byte, top candidates, tree leaves, checked against the golden model.</span></button>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="s2">
+  <div class="step"><span class="n">2</span><h2 id="s2">Where it runs</h2></div>
+  <div class="cards" id="targets">
+    <button type="button" class="card" data-target="golden" aria-pressed="false"><b>Golden model</b><span>No hardware. The integer reference in Python on this PC. No timing.</span></button>
+    <button type="button" class="card" data-target="host" aria-pressed="false"><b>PC build</b><span>The plain-C reference compiled for this PC (MNIST only). No timing.</span></button>
+    <button type="button" class="card" data-target="pico" aria-pressed="false"><b>Pico 2 board</b><span>The firmware on the board, with cycle counts. Keep the current build or flash another one.</span></button>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="s3">
+  <div class="step"><span class="n">3</span><h2 id="s3">Which model or build</h2></div>
+  <div id="detail"><p class="note">Choose a test and where it runs.</p></div>
+</section>
+
+<div class="row">
+  <button type="button" class="btn primary" id="bStart" disabled>Start</button>
+  <span class="note" id="startNote"></span>
+</div>
+
+</div>
+
+<script>
+'use strict';
+const S = { opt: null, test: null, target: null, choice: {}, filter: '', status: null };
+const $ = id => document.getElementById(id);
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'style') e.style.cssText = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+}
+async function getJSON(u) { const r = await fetch(u); return r.json(); }
+async function postJSON(u, body) { const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return r.json(); }
+
+async function loadOptions() { S.opt = await getJSON('/api/options'); renderBoard(); renderDetail(); }
+
+function renderBoard() {
+  const b = S.opt.board, chip = $('boardChip');
+  let cls = '', text = `board on ${S.opt.port}: ${b.state}`;
+  if (b.state === 'ok') { cls = 'ok'; text = `board on ${S.opt.port}: ${b.info.build}`; }
+  else if (b.state === 'in use' || b.state === 'busy' || b.state === 'checking') cls = 'warn';
+  else if (b.state !== 'unknown') cls = 'bad';
+  chip.className = 'chip ' + cls;
+  $('boardText').textContent = text;
+  chip.title = b.error || '';
+}
+
+function pick(group, attr, value) {
+  S[attr] = value;
+  document.querySelectorAll(`#${group} .card`).forEach(c => c.setAttribute('aria-pressed', String(c.dataset[attr] === value)));
+  if (attr === 'test') { S.choice = {}; if (value === 'story' && S.target === 'host') pick('targets', 'target', null); }
+  document.querySelector('#targets [data-target=host]').disabled = S.test === 'story';
+  renderDetail();
+}
+
+function renderDetail() {
+  const box = $('detail'), o = S.opt;
+  if (!o || !S.test || !S.target) { box.replaceChildren(el('p', { class: 'note' }, 'Choose a test and where it runs.')); return updateStart(); }
+  if (S.target === 'golden') {
+    const list = S.test === 'mnist' ? o.mnist_models : o.story_npz;
+    const key = S.test === 'mnist' ? 'model' : 'npz';
+    if (!S.choice[key]) S.choice[key] = S.test === 'mnist' ? 'tern80' : (list.includes('lm_tree.npz') ? 'lm_tree.npz' : list[0]);
+    const sel = el('select', { onchange: e => { S.choice[key] = e.target.value; updateStart(); } },
+      ...list.map(m => { const op = el('option', { value: m }, m); if (m === S.choice[key]) op.selected = true; return op; }));
+    box.replaceChildren(el('div', { class: 'row' }, el('label', { class: 'inline' }, S.test === 'mnist' ? 'Model' : 'Integer model (train/runs)', sel)),
+      el('p', { class: 'note' }, S.test === 'mnist' ? 'tern80 is the Gate 1 model; z70/z90 have 70% and 90% of fc1 forced to zero; int8_80 has int8 linear layers.'
+        : 'lm_tree and lm_dense are the trained twins; check_* are the 2,000-step check models.'));
+  } else if (S.target === 'host') {
+    if (!S.choice.exe) S.choice.exe = o.host_exes.find(x => x.includes('tern80.')) || o.host_exes[0];
+    const sel = el('select', { onchange: e => { S.choice.exe = e.target.value; updateStart(); } },
+      ...o.host_exes.map(m => { const op = el('option', { value: m }, m); if (m === S.choice.exe) op.selected = true; return op; }));
+    box.replaceChildren(o.host_exes.length ? el('div', { class: 'row' }, el('label', { class: 'inline' }, 'PC build', sel))
+      : el('p', { class: 'note' }, 'No PC builds in firmware/baselines/ref_c/build-host. Build them first (harness/README.md).'));
+  } else {
+    const info = o.board.info, onBoard = info && info.test === S.test;
+    if (S.choice.build === undefined) S.choice.build = onBoard ? '' : null;
+    const keep = el('button', { type: 'button', class: 'build', 'aria-pressed': String(S.choice.build === ''), disabled: !onBoard,
+      onclick: () => { S.choice.build = ''; renderDetail(); } },
+      el('span', { class: 'nm' }, 'Keep what is on the board'),
+      el('span', { class: 'tags' }, el('span', { class: 'tag cur' }, info ? info.build : (o.board.state === 'in use' ? 'in use by the running test' : 'unknown')),
+        info && !onBoard ? el('span', { class: 'tag' }, `a ${info.test === 'story' ? 'tiny story' : 'MNIST'} build`) : null));
+    const search = el('input', { type: 'search', placeholder: 'Filter builds, e.g. ram dual tree', value: S.filter, 'aria-label': 'Filter builds',
+      oninput: e => { S.filter = e.target.value; renderBuilds(); } });
+    box.replaceChildren(keep, el('div', { class: 'row', style: 'margin-top:12px' }, search),
+      el('p', { class: 'note' }, 'Or flash one of the existing builds first (over SWD; takes about 10 s). Nothing is compiled here.'),
+      el('div', { class: 'builds', id: 'builds' }));
+    if (!o.flash_tool) box.append(el('p', { class: 'note', style: 'color:var(--warn)' }, 'Git Bash not found, so flashing is unavailable; keep the current build.'));
+    renderBuilds();
+  }
+  updateStart();
+}
+
+function renderBuilds() {
+  const box = $('builds');
+  if (!box) return;
+  const words = S.filter.toLowerCase().split(/\s+/).filter(Boolean);
+  const cur = S.opt.board.info ? S.opt.board.info.build : '';
+  const list = S.opt.builds.filter(b => b.test === S.test).filter(b => {
+    const hay = (b.name + ' ' + b.tags.join(' ') + ' ' + b.group).toLowerCase();
+    return words.every(w => hay.includes(w));
+  });
+  const kids = [];
+  let g = '';
+  for (const b of list) {
+    if (b.group !== g) { g = b.group; kids.push(el('div', { class: 'grp' }, g.toUpperCase())); }
+    kids.push(el('button', { type: 'button', class: 'build', 'aria-pressed': String(S.choice.build === b.path), disabled: !!b.unsupported || !S.opt.flash_tool,
+      title: b.unsupported || b.path, onclick: () => { S.choice.build = b.path; renderDetail(); } },
+      el('span', { class: 'nm' }, b.name),
+      el('span', { class: 'tags' }, ...b.tags.map(t => el('span', { class: 'tag' }, t)),
+        b.unsupported ? el('span', { class: 'tag', style: 'color:var(--warn)' }, 'not in the live view yet') : null)));
+  }
+  box.replaceChildren(...(kids.length ? kids : [el('p', { class: 'note' }, 'No builds match.')]));
+}
+
+function updateStart() {
+  let ok = !!(S.test && S.target), note = '';
+  if (ok && S.target === 'pico') { ok = S.choice.build != null; if (!ok) note = 'Pick a build, or keep the one on the board.'; }
+  if (ok && S.target === 'host') ok = !!S.choice.exe;
+  const busy = S.status && ['stopping', 'flashing', 'starting'].includes(S.status.state);
+  if (busy) { ok = false; note = 'A test is starting…'; }
+  if (ok && S.status && S.status.running) note = 'Starting this stops the running test.';
+  $('bStart').disabled = !ok;
+  $('startNote').textContent = note;
+}
+
+async function start() {
+  const body = { test: S.test, target: S.target, ...S.choice };
+  const r = await postJSON('/api/start', body);
+  if (r.error) $('startNote').textContent = r.error;
+  poll();
+}
+
+let lastLog = '';
+async function poll() {
+  try { S.status = await getJSON('/api/status'); } catch (e) { return; }
+  const st = S.status, box = $('run');
+  box.classList.toggle('hidden', st.state === 'idle' && !st.log.length);
+  box.className = 'run' + (st.state === 'running' ? ' running' : st.state === 'error' ? ' error' : '') + (st.state === 'idle' && !st.log.length ? ' hidden' : '');
+  const names = { idle: 'Nothing running.', stopping: 'Stopping…', flashing: 'Flashing…', starting: 'Starting…', running: 'Running:', error: 'Could not start:' };
+  $('runState').textContent = names[st.state] || st.state;
+  $('runLabel').textContent = st.state === 'running' ? st.test : (st.test || '');
+  $('runDetail').textContent = st.state === 'running' ? 'Open the live view; its "All tests" link comes back here.' : (st.detail || '');
+  $('bOpen').classList.toggle('hidden', st.state !== 'running');
+  if (st.url) $('bOpen').href = st.url;
+  $('bStop').classList.toggle('hidden', !st.running && !['flashing', 'starting'].includes(st.state));
+  const log = st.log.join('\n');
+  if (log !== lastLog) { lastLog = log; $('log').textContent = log; $('log').scrollTop = 1e9; }
+  if (st.state === 'error') $('logBox').open = true;
+  if (st.state === 'running' && S.awaiting) { S.awaiting = false; location.href = st.url; }
+  updateStart();
+}
+
+document.querySelectorAll('#tests .card').forEach(c => c.addEventListener('click', () => pick('tests', 'test', c.dataset.test)));
+document.querySelectorAll('#targets .card').forEach(c => c.addEventListener('click', () => { if (!c.disabled) pick('targets', 'target', c.dataset.target); }));
+$('bStart').addEventListener('click', () => { S.awaiting = true; start(); });
+$('bStop').addEventListener('click', async () => { await postJSON('/api/stop'); setTimeout(() => { loadOptions(); poll(); }, 300); });
+$('bProbe').addEventListener('click', async () => { await postJSON('/api/probe'); $('boardText').textContent = 'board: checking…'; setTimeout(loadOptions, 6000); });
+loadOptions();
+poll();
+setInterval(poll, 1000);
+setInterval(() => { if (S.opt && ['checking', 'unknown'].includes(S.opt.board.state)) loadOptions(); }, 2000);
+</script>
+</body>
+</html>

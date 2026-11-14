@@ -128,6 +128,7 @@ table.diff tr.x { background: #3A1A1D; color: var(--bad); font-weight: 700; }
   <div class="chips">
     <span id="state" class="chip state" role="status" aria-live="polite"><span class="dot"></span><span id="stateText">CONNECTING</span></span>
     <span id="chipPort" class="chip hidden"></span>
+    <a id="homeLink" class="chip hidden" href="#" style="text-decoration:none;color:var(--text)">← All tests</a>
     <span id="chipBuild" class="chip">—</span>
     <span id="chipModel" class="chip">—</span>
     <span id="chipHz" class="chip hidden"></span>
@@ -347,6 +348,7 @@ function render() {
 
 function renderInfo() {
   const i = S.info;
+  if (i.home) { $('homeLink').href = i.home; $('homeLink').classList.remove('hidden'); }
   $('chipBuild').textContent = 'build ' + (i.build || i.target);
   $('chipModel').textContent = i.model;
   $('chipPort').textContent = i.port; $('chipPort').classList.toggle('hidden', !i.port);
