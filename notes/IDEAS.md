@@ -100,3 +100,19 @@ Compare all three with all-flash (5.80 ms) and all-SRAM (4.80 ms).
 - **The hybrid:** code for small or hot parts, data for the rest. That's exactly the three-way test in HANDOFF step 8 (all-code / all-data / hybrid).
 
 **Test:** build fc1 all-code, all-data (v0) and hybrid, on tern80 and tern80z90, from flash and from SRAM. Measure cycles, flash size and code size.
+
+## U5. Microsoft BitNet / bitnet.cpp for the Pi phase (noted 13 Nov 2026)
+
+[bitnet.cpp](https://github.com/microsoft/BitNet) (MIT) is Microsoft's inference engine for ternary models, built on llama.cpp. It has NEON (ARM) and AVX2 (x86) CPU kernels, and its flagship model is BitNet b1.58 2B4T (2.4B weights). Papers: [arXiv 2410.16144](https://arxiv.org/abs/2410.16144), [arXiv 2502.11880](https://arxiv.org/abs/2502.11880).
+
+- **Use as the Pi 4/5 baseline** for the big-model goal. It runs under Linux as is, so it plays the role Atome plays on the Pico.
+- **Weight formats worth stealing for the compiler:**
+  - I2_S: 2 bits per weight, as in our v0.
+  - TL1: a pair of weights becomes a 4-bit index into a 9-entry table precomputed per pair of activations.
+  - TL2: 5 bits per 3 weights (a sign bit plus a 4-bit index), so 1.67 bits per weight; meant for when bandwidth is the limit.
+  - These lookup tables are our idea E, and on NEON they use `vqtbl1q_u8`. TL2 could also cut flash bytes per token on the Pico by about 17%.
+- **Trained ternary models of 0.7B–10B** for the larger-than-memory experiments, without training our own.
+- **Caveats:**
+  - No Raspberry Pi numbers are published; the ARM results are from an M2 Ultra (1.4–5x faster than llama.cpp, 55–70% less energy), and the paper says bandwidth matters a lot.
+  - Activations use one int8 scale per tensor, where ours use one per token.
+  - Not yet checked: the 2B4T architecture (squared ReLU? subln?) and the licences of the individual models.
