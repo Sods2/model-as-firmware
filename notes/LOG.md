@@ -258,3 +258,11 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
   - From SRAM: 14.92 vs 14.54 ms (+3%), so the Gate 1 bar and the 4.08x stand.
   - Our flash-build ratios against CMSIS-NN shrink by about 7% (hybrid one core 5.22x → 4.85x).
   - fc2/fc3 can't use s4 without changing the model: their BitNetMCU 4-bit levels are ±1…±15.
+- **Live story view** (`ui/story.html`, `harness/story_live.py`; `bridge.py` switches to it when the board runs a MafLM build). Checked on the board with `lm_tree` (SRAM, two cores, profiling build):
+  - 256 of 256 positions bit-exact against the golden model;
+  - 3.17 ms per byte over positions 0–23 and 4.93 ms over the window, matching `phase3.csv`;
+  - attention is 59% of the cycles at position 255.
+  - Sampled generation (temperature 0.8, seeded) avoids the greedy repetition loops.
+- **Test launcher** (`harness/launcher.py`, `ui/launcher.html`): one page to choose MNIST or the story model, then golden, PC build or board, then keep the board's build or flash any existing one.
+  - It starts the matching live view on port 8766, and both live pages link back.
+  - Checked: MNIST on the board after flashing `mafc2_s-tern80-ram-code-i4code-prof` (2.00 ms, 100% golden match); the story model after flashing `lm_tree-ram-dual`; the MNIST PC build; the story golden model; and keeping the board's build.

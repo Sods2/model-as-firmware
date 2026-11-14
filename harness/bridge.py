@@ -1,4 +1,5 @@
-"""Live bridge: run MNIST test images through a target and stream what happens to a browser.
+"""Live bridge: run MNIST test images (or, in story mode, a MafLM story model) through a target and stream what
+happens to a browser.
 
 Serves the live UI (ui/live.html) and a Server-Sent Events stream on http://127.0.0.1:8765.
 Nothing to install beyond what run.py already needs (numpy, torch/torchvision for MNIST, pyserial for pico).
@@ -8,6 +9,11 @@ Usage (Git Bash, from the repo root), then open http://127.0.0.1:8765:
   $PY harness/bridge.py --target golden                     # no hardware
   $PY harness/bridge.py --target host --exe firmware/baselines/ref_c/build-host/ref_host_tern80.exe
   $PY harness/bridge.py --target pico --port COM3           # flash a *_prof build to see per-stage cycles
+
+Story mode (harness/story_live.py, ui/story.html): chosen by itself when the board runs a MafLM build, or with
+--task story:
+  $PY harness/bridge.py --task story --target golden --npz train/runs/lm_tree.npz   # no hardware
+  $PY harness/bridge.py --target pico --port COM3 --prompt "Once"                  # board with a maflm build
 
 Endpoints:
   GET  /                  the UI
@@ -328,7 +334,7 @@ class Runner(threading.Thread):
                 'build': self.meta.get('build', ''), 'sys_hz': int(self.meta.get('sys_hz', 0)),
                 'port': self.args.port or '', 'n_images': len(self.img8),
                 'golden': 'ref' if isinstance(self.golden, Golden) else 's8', 'stage_names': STAGES,
-                'rate': self.rate}
+                'rate': self.rate, 'home': self.args.home}
         self.hub.publish(info)
         self.status('paused' if self.paused else 'streaming')
         last_summary, next_t = 0.0, time.perf_counter()
@@ -479,14 +485,16 @@ def main():
     ap.add_argument('--force', action='store_true',
                     help='open the board even if a harness run, measure script or picotool seems to be running')
     ap.add_argument('--http-port', type=int, default=8765)
+    ap.add_argument('--task', choices=['auto', 'mnist', 'story'], default='auto',
+                    help='auto: story when the board reports a MafLM build, else MNIST')
+    ap.add_argument('--npz', help='story mode: integer model (default: train/runs/<board model>.npz, else lm_tree)')
+    ap.add_argument('--prompt', help='story mode: start generating this prompt right away')
+    ap.add_argument('--home', help='URL of the test launcher (harness/launcher.py); the page links back to it')
     args = ap.parse_args()
     if args.target == 'host' and not args.exe:
         ap.error('--target host needs --exe')
     if args.target == 'pico' and not args.port:
         ap.error('--target pico needs --port')
-    if args.rate is None:
-        args.rate = 0.0 if args.target == 'pico' else 20.0
-
     meta = {}
     if args.target == 'pico':  # ask the board what it runs, to pick the matching model and golden model
         probe = PicoTarget(args.port, args.force)
@@ -497,6 +505,23 @@ def main():
         finally:
             probe.close()
         print(f'board: build={meta.get("build")} model={meta.get("model")} sys_hz={meta.get("sys_hz")}')
+        if args.task == 'mnist' and 'window' in meta:
+            sys.exit('the board runs a MafLM story build: drop --task mnist, or flash an MNIST build')
+        if args.task == 'auto' and 'window' in meta:
+            args.task = 'story'
+    if args.task == 'story':
+        import story_live
+        if args.target == 'host':
+            ap.error('story mode supports --target golden or pico')
+        if args.target == 'pico' and 'window' not in meta:
+            sys.exit('the board does not run a MafLM build (no window= in its INFO line): flash one first')
+        args.npz = args.npz or str(ROOT / 'train' / 'runs' / f'{meta.get("model") or "lm_tree"}.npz')
+        if args.rate is None:
+            args.rate = 0.0
+        return story_live.serve(args, meta)
+    if args.rate is None:
+        args.rate = 0.0 if args.target == 'pico' else 20.0
+    if args.target == 'pico':
         board_model = meta.get('model', '').split(':')[-1].removesuffix('.h')  # 'tern80z90.h', 'mafc:tern80'
         if args.model is None and board_model in CONFIGS:
             args.model = board_model
