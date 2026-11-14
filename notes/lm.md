@@ -242,3 +242,34 @@ What changed (all still bit-exact: the PC check and the board check pass for bot
 - **From SRAM, two cores give 1.6x on both twins.** Every stage gains 1.6–1.9x. The rest is handshakes (about 6 jobs per layer) and serial per-vector work on core 0.
 - **From flash, the gain is only 1.1x.** The weight stream from flash is the bottleneck, and it can't be split. To overlap it with compute, core 1 could prefetch the next layer into SRAM by DMA from the XIP stream FIFO (ideas C and G).
 - **The tree stays 2.1–2.5x faster than its dense twin in every configuration.**
+
+## Trained models (overnight run, 13–14 Nov 2026)
+
+`train/lm/overnight.sh` with the defaults: 61,000 steps × 128 × 256 = **2.0B bytes per twin**, the same token budget as Atome. Dense took 2 h 46 min and the tree 3 h 25 min on the PC's GPU. The best checkpoint (validation every 2,000 steps) was step 56,000 for both. Late in the cosine schedule the validation number moves by about ±0.005 between evaluations, which is the noise of a 2 MB evaluation set.
+
+| Model | Bits/byte (V2-valid, first 2 MB, 256 window) | Perplexity | Integer reference | Weights read per token |
+|---|---|---|---|---|
+| Atome 944K (2B tokens) | 1.711 | 3.27 | – | ~880K |
+| **MafLM dense** | **1.152** | **2.22** | 1.153 (+0.0002) | 885K |
+| **MafLM tree** | **1.206** | **2.31** | 1.206 (+0.0006) | 315K |
+| (2,000-step check models) | 1.427 / 1.507 | 2.69 / 2.84 | | |
+
+- **Both twins beat Atome by a wide margin**, with the same token budget and slightly fewer weights: −0.56 bits/byte for the dense twin and −0.51 for the tree.
+- **The tree costs 0.054 bits/byte (4.7%) against its dense twin** for 2.8x fewer weights read. The gap shrank from 0.080 on the check models.
+- **The tree's routing stayed balanced** throughout the hard phase: leaf entropy 2.98–2.99 of 3 bits in every layer.
+- **The integer reference matches PyTorch to within 0.0006 bits/byte.**
+- **Samples** (greedy, from the integer reference and identical on the board): fluent TinyStories openings, for example "Once upon a time, there was a little boy named Tim. Tim loved to play with his toy ball." Greedy decoding falls into repetition loops after one or two sentences ("The dog was sad and said, ..."), as small models do; sampling with a temperature would be the fix and is a firmware change only.
+
+**On the Pico 2** (two cores, `build-lm_<twin>-<mem>-dual`, `results/phase3.csv`): bit-exact against the integer reference on 2 × 256 positions for all four builds, and the same generated text as the PC.
+
+| Build | ms/token, positions 0–23 | tok/s | ms/token, whole 256 window | tok/s | Flash read per token |
+|---|---|---|---|---|---|
+| Dense, flash | 20.81 | 48.0 | 22.82 | 43.8 | 223 KB |
+| Dense, SRAM | 6.77 | 147.7 | 8.56 | 116.8 | 0 |
+| Tree, flash | 8.47 | 118.0 | 10.41 | 96.1 | **82 KB** |
+| Tree, SRAM | **3.22** | **310.3** | **4.99** | **200.6** | 0 |
+| Atome, upstream engine, SRAM (window 24) | 1,414 | 0.71 | – | – | 0 |
+
+- Speed is the same as with the check models, as expected: same architecture, same kernels.
+- **The tree is 2.1x faster than the dense twin from SRAM and 2.5x faster from flash** over positions 0–23 (1.7x and 2.2x over the whole window, where attention takes a larger share).
+- Against Atome's engine on the same board: the tree from SRAM is about 440x faster per token at window 24, and 1.7 bits/byte → 1.2.

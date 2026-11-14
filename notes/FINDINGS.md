@@ -479,6 +479,29 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - That is the case idea B is for: models whose feedforward weights don't fit in SRAM, where flash traffic sets the speed (F22). The next test is the tiny story model (HANDOFF section 7), where feedforward layers dominate.
   - Training needs care: without load balancing the tree collapses silently, and the soft-phase accuracy hides it (hard routing must be what is evaluated).
 
+### F26. Phase 3: our own ternary story model beats Atome by 0.5 bits/byte; its tree twin runs at 310 tok/s on the Pico 2, 2.1–2.5x faster than the dense twin for 4.7% in bits/byte
+- **Models:** MafLM (`train/lm/`), d=128, 4 layers, GQA + ALiBi, byte vocabulary, all linear layers ternary with int8 activations. The dense twin has a 128 → 640 → 128 feedforward layer; the tree twin has a depth-3 fast feedforward tree with 8 leaves of 80, the same total width. About 0.92M weights each, like Atome's 944K.
+- **Training:** 2B bytes each on TinyStories V2, Atome's budget (overnight, 2 h 46 min and 3 h 25 min).
+- **Quality** (bits/byte on V2-valid, first 2 MB, 256-byte window):
+  - Atome: 1.711.
+  - **Dense: 1.152. Tree: 1.206.**
+  - The integer reference is within 0.0006 bits/byte of PyTorch.
+  - The tree's routing stays balanced (leaf entropy 2.98–2.99 of 3 bits).
+- **Pico 2, two cores, bit-exact on all four builds:**
+
+  | Build | Positions 0–23 | Whole 256 window | Flash per token |
+  |---|---|---|---|
+  | Tree, SRAM | **3.22 ms, 310 tok/s** | 4.99 ms, 201 tok/s | 0 |
+  | Tree, flash | 8.47 ms, 118 tok/s | 10.41 ms, 96 tok/s | 82 KB |
+  | Dense, SRAM | 6.77 ms, 148 tok/s | 8.56 ms, 117 tok/s | 0 |
+  | Dense, flash | 20.81 ms, 48 tok/s | 22.82 ms, 44 tok/s | 223 KB |
+  | Atome's engine, SRAM, window 24 | 1,414 ms, 0.71 tok/s | – | 0 |
+
+- **Reading:**
+  - Idea B holds on a language model: 2.8x fewer weights read per token, 2.1x faster from SRAM and 2.5x from flash, for 0.054 bits/byte.
+  - Most of the gain over Atome's engine comes from the design for integer inference (a KV cache instead of recomputing the window, ternary × int8 lookup-table kernels, two cores), not from the tree.
+  - Details: [lm.md](lm.md).
+
 ## Gate 1
 
 **Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images), mafc is faster than CMSIS-NN in every like-for-like setup:

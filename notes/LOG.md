@@ -232,3 +232,9 @@ Newest first. Numbers are on the full 10k MNIST test set unless stated otherwise
   - The tree is 2.1–2.4x faster than its dense twin. Attention dominates late in the window.
 - **Runtime v1** (activation lookup tables, 32-bit divisions, SMLAD attention): about 2x faster than v0, still bit-exact. Tree from SRAM: **195 tok/s** over the first 24 positions and 117 over the 256 window. Dense: 90 and 69. From flash: tree 106 and dense 43 tok/s. Next: the second core.
 - **Two cores:** tree from SRAM at **307 tok/s** (185 over the 256 window), dense at 147. From SRAM that is 1.6x on both twins; from flash only 1.1x, and only once flash-resident rows stay on one core. Splitting them made both cores contend for XIP and ran slower than one core.
+
+## 14 Nov 2026
+
+- **Overnight training finished** (2B bytes per twin, the same budget as Atome): dense **1.152 bits/byte** (perplexity 2.22) and tree **1.206** (2.31), against Atome's 1.711 (3.27). The integer reference is within 0.0006 bits/byte of PyTorch, and the PC builds are bit-exact.
+- **On the Pico 2, two cores, all four builds bit-exact.** Tree from SRAM: **310 tok/s** over the first 24 positions and 201 over the 256 window; from flash 118 and 96. Dense from SRAM: 148 and 117; from flash 48 and 44.
+- The tree costs 4.7% in bits/byte against its dense twin and runs 2.1–2.5x faster. Details in [lm.md](lm.md) and F26 in [FINDINGS.md](FINDINGS.md).
