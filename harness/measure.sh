@@ -2,7 +2,7 @@
 # Build, flash and measure any set of builds on the Pico 2 (Git Bash, from the repo root).
 #
 #   harness/measure.sh <profile|final|energy> <csv> <build:model:mem[:ternary[:int4[:conv[:stream[:int8]]]]]> ...
-#     build  ref_c | cmsis_nn | mafc | mafc2 (dual-core) | mafc_s (SMLAD) | mafc2_s (dual-core + SMLAD)
+#     build  ref_c | cmsis_nn | cmsis_nn_s4 (fc1 as CMSIS-NN s4) | mafc | mafc2 (dual-core) | mafc_s (SMLAD) | mafc2_s (dual-core + SMLAD)
 #     model  tern80 | tern80z70 | tern80z90 | int8_80 (all linear layers int8)
 #     mem    flash | ram          (ram = copy_to_ram: code and weights in SRAM)
 #     ternary  base3 (default) | sparse | code | dense   (mafc builds: format of fc1, compile.py --ternary)
@@ -36,13 +36,14 @@ for spec in "$@"; do
   case $build in
     ref_c)    src=firmware/baselines/ref_c;    golden=ref ;;
     cmsis_nn) src=firmware/baselines/cmsis_nn; golden=s8 ;;
+    cmsis_nn_s4) src=firmware/baselines/cmsis_nn; golden=s8; extra="-DFC1_S4=ON" ;;
     mafc)     src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=OFF -DSIMD=OFF" ;;
     mafc2)    src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=ON -DSIMD=OFF" ;;
     mafc_s)   src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=OFF -DSIMD=ON" ;;
     mafc2_s)  src=firmware/rp2350/mafc;        golden=ref; extra="-DDUAL_CORE=ON -DSIMD=ON" ;;
     *) echo "unknown build $build"; exit 1 ;;
   esac
-  case $build in mafc*) target=mafc ;; *) target=$build ;; esac
+  case $build in mafc*) target=mafc ;; cmsis_nn*) target=cmsis_nn ;; *) target=$build ;; esac
   dir=$src/build-$build-$model-$mem$SUFFIX
   [ "$tern" != base3 ] && dir=$src/build-$build-$model-$mem-$tern$SUFFIX
   [ "$i4" != packed ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4$SUFFIX

@@ -5,3 +5,7 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-11 12:52,cmsis_nn_ram,tern80,pico,10000,99.44,100.0,99.91,14.521,2178086,2178031,2178983,150,93.54,127.0,,,
 2026-11-11 12:55,ref_c,tern80z70,pico,10000,99.47,100.0,99.97,10.157,1523584,1517376,1620693,150,47.33,7.67,,,
 2026-11-11 12:58,ref_c,tern80z90,pico,10000,99.51,100.0,99.98,10.1,1514971,1508880,1614427,150,47.33,7.67,,,
+2026-11-14 10:45,cmsis_nn_s4fc1,tern80,pico,10000,99.44,100.0,99.91,17.411,2611640,2601537,2669810,150,80.69,37.79,29.64,,"fc1 as CMSIS-NN s4 (packed ternary), fc2/fc3 s8; fairness check 14 Nov"
+2026-11-14 10:49,cmsis_nn_s4fc1_ram,tern80,pico,10000,99.44,100.0,99.91,14.916,2237404,2237365,2238820,150,80.58,109.52,0.0,,"fc1 as CMSIS-NN s4 (packed ternary), fc2/fc3 s8; fairness check 14 Nov"
+2026-11-14 10:53,cmsis_nn,tern80,pico,10000,99.44,100.0,99.91,18.736,2810385,2801481,2846917,150,94.01,37.79,45.43,,"s8 control re-run, same session as the s4 rows (14 Nov)"
+2026-11-14 10:57,cmsis_nn_ram,tern80,pico,10000,99.44,100.0,99.91,14.535,2180307,2180271,2181222,150,93.91,122.86,0.0,,"s8 control re-run, same session as the s4 rows (14 Nov)"

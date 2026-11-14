@@ -72,7 +72,7 @@ A Python script that talks to the Pico over USB. For each image it:
 ### The CMSIS-NN baseline (step 5): the bar to beat
 CMSIS-NN is ARM's official, optimised AI library for this kind of chip. To claim our approach is faster, we must beat *it*, not just our own slow code. It runs **the same model with the same weights**, as standard 8-bit numbers.
 
-To be fair to it: CMSIS-NN has no ternary or 4-bit kernels, so it has to run weights 4x or more larger than ours, and its kernels happen to be weak for this model's unusual shape (a first layer with one input channel, and depthwise convolutions). Part of our lead comes from that, not from our method; see FINDINGS F5 and F17.
+To be fair to it: CMSIS-NN has no ternary kernels. It does have 4-bit ones: using them for fc1 makes its whole model 7% faster from flash, though slightly slower from SRAM (FINDINGS F27). Its weights are still 2–2.5x larger than our packed ternary ones, and its kernels happen to be weak for this model's unusual shape (a first layer with one input channel, and depthwise convolutions). Part of our lead comes from that, not from our method; see FINDINGS F5 and F17.
 
 ## 7. Results so far
 

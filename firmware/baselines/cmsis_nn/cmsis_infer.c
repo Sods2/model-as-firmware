@@ -115,7 +115,17 @@ uint32_t ref_infer(const int8_t img[REF_IMG_PIXELS], int32_t logits[REF_N_CLASSE
     arm_max_pool_s8(&ctx, &pp, &pool2_idim, buf_b, &pool_fdim, &pool2_odim, buf_a);
     PROF_STAGE(ST_POOL2);
 
+#ifdef FC1_S4
+    {   // fc1 as CMSIS-NN s4: the same ternary weights packed two per byte (model_s4fc1_<model>.h)
+        const cmsis_nn_context c4 = {scratch, SCRATCH_BYTES};
+        const cmsis_nn_fc_params p4 = {0, 0, 0, {0, 127}};
+        const cmsis_nn_per_tensor_quant_params q4 = {S8_FC1_MULT, S8_FC1_SHIFT};
+        const cmsis_nn_dims i4 = {1, 1, 1, 4 * C}, f4 = {4 * C, 1, 1, S8_FC1_OUT}, o4 = {1, 1, 1, S8_FC1_OUT};
+        arm_fully_connected_s4(&c4, &p4, &q4, &i4, buf_a, &f4, s4_fc1_w, &no_bias, NULL, &o4, fc_a);
+    }
+#else
     fc(buf_a, 4 * C, s8_fc1_w, S8_FC1_OUT, S8_FC1_MULT, S8_FC1_SHIFT, 0, fc_a);
+#endif
     PROF_STAGE(ST_FC1);
     fc(fc_a, S8_FC1_OUT, s8_fc2_w, S8_FC2_OUT, S8_FC2_MULT, S8_FC2_SHIFT, 0, fc_b);
     PROF_STAGE(ST_FC2);

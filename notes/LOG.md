@@ -5,7 +5,7 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
 **How to read the numbers (added 14 Nov 2026, fairness review):**
 - Unless an entry says otherwise, every "Nx faster than CMSIS-NN" for a two-core build compares our two cores with CMSIS-NN's one. The like-for-like figure is one core against one: 4.08x, both from SRAM (FINDINGS F17, F18, Gate 1).
 - Flash-build ratios compare our builds, which keep the linear layers as code in SRAM, with CMSIS-NN entirely in flash.
-- CMSIS-NN ran int8 only, although it also has 4-bit kernels (F11).
+- CMSIS-NN ran int8 only until 14 Nov. Its 4-bit kernel for fc1 (F27) makes its flash build 7% faster, so earlier flash ratios are about 7% too high. The SRAM bar stands.
 - "Best" accuracies are the best epoch picked on the test set, which is optimistic. The "final" numbers are the fair ones.
 - Every model is one training run (one seed). Energy was never measured.
 
@@ -253,3 +253,8 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
   - Atome shows no sign of having seen our test text, although its corpus script draws from the same file.
   - The 440x speed gap compares engines: ~15x of it is Atome's engine recomputing the context for every token.
   - Decision: we don't build or retrain anything of Atome's. The claims about idea B rest on the dense and tree twins.
+- **CMSIS-NN with its 4-bit kernel for fc1** (F27): the same ternary weights packed as s4, bit-exact on 10k images.
+  - From flash: 17.41 vs 18.74 ms (−7%), with 29.6 vs 45.4 KB of flash read and 80.7 vs 94.0 KB of flash.
+  - From SRAM: 14.92 vs 14.54 ms (+3%), so the Gate 1 bar and the 4.08x stand.
+  - Our flash-build ratios against CMSIS-NN shrink by about 7% (hybrid one core 5.22x → 4.85x).
+  - fc2/fc3 can't use s4 without changing the model: their BitNetMCU 4-bit levels are ±1…±15.

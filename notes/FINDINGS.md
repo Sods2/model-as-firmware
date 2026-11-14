@@ -14,6 +14,8 @@ Setup for all numbers:
 |---|---|---|---|---|---|---|---|
 | CMSIS-NN int8 | flash | 18.70 ms | 2.81M | 1.00x | 93.6 KB | 33.5 KB | `results/phase0.csv` |
 | CMSIS-NN int8 | SRAM | 14.52 ms | 2.18M | 1.00x | 93.5 KB | 127.0 KB | `results/phase0.csv` |
+| CMSIS-NN, fc1 as s4 (F27) | flash | 17.41 ms | 2.61M | best CMSIS-NN from flash | 80.7 KB | 37.8 KB | `results/phase0.csv` |
+| CMSIS-NN, fc1 as s4 (F27) | SRAM | 14.92 ms | 2.24M | slower than s8 from SRAM | 80.6 KB | 109.5 KB | `results/phase0.csv` |
 | ref_c (hand-written plain C) | flash | 10.21 ms | 1.53M | 1.83x | 47.3 KB | 7.7 KB | `results/phase0.csv` |
 | ref_c | SRAM | 9.52 ms | 1.43M | 1.53x | 47.2 KB | 54.9 KB | `results/phase0.csv` |
 | mafc v0 (compiled, one core) | flash | 8.66 ms | 1.30M | 2.16x | 46.4 KB | 9.2 KB | `results/phase1.csv` |
@@ -35,7 +37,7 @@ Setup for all numbers:
 | mafc v1 + SMLAD + linear as code + shared kernel (two cores) | flash, linear in SRAM | 2.27 ms | 0.34M | 8.23x | 156.5 KB | 129.2 KB* | `results/phase1.csv` |
 | **mafc v1 + SMLAD + linear as code + shared kernel (two cores)** | **SRAM** | **1.99 ms** | **0.30M** | **7.28x** | 156.4 KB | 161.1 KB* | `results/phase1.csv` |
 
-† Same place, not always the same conditions. Two-core rows are compared against one-core CMSIS-NN. In the "linear in SRAM" / "fc1 in SRAM" rows, mafc keeps those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM). Against CMSIS-NN from SRAM (14.52 ms), those rows are 3.5x (4.11 ms), 5.0x (2.89 ms), 4.05x (3.59 ms), 6.2x (2.35 ms) and 6.4x (2.27 ms). The fair one-core, same-memory figure is **4.08x**. The faster builds also use more flash than CMSIS-NN (156–161 KB vs 94 KB). CMSIS-NN ran with int8 weights throughout, although it also has 4-bit (s4) kernels; see F11.
+† Same place, not always the same conditions. Two-core rows are compared against one-core CMSIS-NN. In the "linear in SRAM" / "fc1 in SRAM" rows, mafc keeps those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM). Against CMSIS-NN from SRAM (14.52 ms), those rows are 3.5x (4.11 ms), 5.0x (2.89 ms), 4.05x (3.59 ms), 6.2x (2.35 ms) and 6.4x (2.27 ms). The fair one-core, same-memory figure is **4.08x**. The faster builds also use more flash than CMSIS-NN (156–161 KB vs 94 KB). The ratios use CMSIS-NN with int8 weights. With its 4-bit kernel for fc1 (F27), CMSIS-NN's flash build gets 7% faster (17.41 ms), so every flash ratio above shrinks by about 7% (8.23x → 7.67x, 5.22x → 4.85x). Its SRAM build gets slower, so the SRAM ratios stand.
 
 \* RAM counted the new way (from 11 Nov, F16): every section linked at an SRAM address, excluding heap and stacks. The older rows used data + bss (+ text for SRAM builds). That overstated SRAM builds by about 5–6 KB, understated flash builds by about 2 KB, and would have missed code placed in SRAM entirely.
 
@@ -96,8 +98,9 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 - **But** the fastest (hybrid) builds use 156–161 KB, **about 1.7x CMSIS-NN's flash**: code costs space (F16).
 - **Caveat on the baseline:** the CMSIS-NN build uses int8 kernels throughout.
   - Its source (the pinned commit in `firmware/baselines/cmsis_nn/third_party/CMSIS-NN`) also has 4-bit packed (s4) kernels: `arm_fully_connected_s4`, `arm_convolve_s4` and `arm_depthwise_conv_s4`.
-  - fc1 (ternary) and fc2/fc3 (int4) could run as s4. That would halve fc1 to 15 KB, close to the 16 KB XIP cache, and cut CMSIS-NN's flash size and flash traffic. Its SRAM speed would probably not improve, since s4 unpacks at run time.
-  - **An s4 variant was not built or measured.** So CMSIS-NN's flash penalty (F2, F22) is partly a result of our int8-only choice.
+  - **Measured in F27:** fc1 (ternary) as s4 shrinks CMSIS-NN to 80.7 KB of flash and makes its flash build 7% faster, with 35% less flash traffic. The SRAM build is 3% slower.
+  - fc2/fc3 can't use s4 without changing the model: their 4-bit levels are ±1…±15.
+  - So part of CMSIS-NN's flash penalty (F2, F22) came from our int8-only choice; F27 gives the corrected numbers.
 
 ### F12. The two cores slow each other down, mostly through flash, and mostly in fc1
 - **Evidence:** in the dual-core build, each core's half of the conv layers takes longer than half the single-core time: **+6–8% from SRAM**, **+12–16% from flash** (core 0 / core 1). The join wait is 21k cycles from flash against 12k from SRAM. On fc1, the flash penalty is +18.5% with one core and **+54.6% with two**. Repeats agree within 0.1–1%.
@@ -372,7 +375,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   The two-core hybrid SRAM build reads nothing from flash (0 accesses), as expected.
 - **Reading:**
   - Hit rates are 98.4–99.96% everywhere, so hits are cheap. The misses set the flash penalty, at roughly 65–110 cycles per 8-byte line (≈ 8–14 cycles per byte). That is a bit worse than the 6.7 cycles/byte of sequential streaming (F21), because misses are scattered.
-  - The hybrid reads **35x less** from flash than CMSIS-NN (1.2 vs 45.5 KB). That is why its flash build runs within 1% of its SRAM build, while CMSIS-NN loses 29%. Caveat: the hybrid gets there by keeping its linear layers as code in SRAM (134 KB of RAM against CMSIS-NN's 38 KB), and CMSIS-NN's traffic would shrink with its s4 kernels, which we didn't use (F11).
+  - The hybrid reads **35x less** from flash than int8 CMSIS-NN (1.2 vs 45.5 KB); 24x less than CMSIS-NN with fc1 as s4 (29.6 KB, F27). That is why its flash build runs within 1% of its SRAM build, while CMSIS-NN loses 29%. Caveat: the hybrid gets there by keeping its linear layers as code in SRAM (134 KB of RAM against CMSIS-NN's 38 KB), and CMSIS-NN's traffic would shrink with its s4 kernels, which we didn't use (F11).
   - All-code reads 49 KB. The conv functions' code doesn't fit the cache, which confirms F20's explanation with a direct measurement.
   - With two cores, the all-data build misses 32% more than with one (13.1 vs 9.9 KB): the cores evict each other's lines, as F12 suspected.
 - **Meaning:** "bytes read from flash per inference" (a metric in the logging table since Phase 0) is now measured for every flash build. For MNIST it confirms the premise: what the compiler places in SRAM, and what it keeps compact, decides flash traffic, and flash traffic decides the flash penalty.
@@ -527,6 +530,35 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
     - On the board, Atome only fits a 24-byte window (1.957 bits/byte there).
   - Details: [lm.md](lm.md).
 
+### F27. CMSIS-NN with its 4-bit kernel for fc1: 7% faster from flash, 3% slower from SRAM; the Gate 1 bar stands, and the flash ratios shrink by about 7%
+- **Why:** the fairness review (14 Nov) found that CMSIS-NN has 4-bit packed (s4) kernels at our pinned commit, and that the baseline had only used its int8 kernels (F11).
+- **What was built:** `harness/export_cmsis_s4.py` packs fc1's ternary weights two per byte (low nibble first, the documented s4 layout) into `model_s4fc1_tern80.h`. `cmsis_infer.c` with `-DFC1_S4=ON` calls `arm_fully_connected_s4` for fc1 (`harness/measure.sh` build `cmsis_nn_s4`).
+- **Only fc1 can use s4 without changing the model.** fc2/fc3 are BitNetMCU "4bitsym" weights with the odd levels ±1, ±3, …, ±15, which don't fit a two's-complement int4 (−8..7). Running them as s4 would mean re-quantizing them, which gives a different model. The export script checks the range and refuses. fc2 and fc3 are only 6.6 KB together; fc1 is 30 KB.
+- **Same model, same answers:** bit-exact with the same golden model (`GoldenS8`) on all 10,000 test images, at 99.44%. The s8 build was re-measured in the same session as a control.
+
+  | CMSIS-NN, tern80, one core | Latency | fc1 stage (image 0) | Flash read / inference | Flash | RAM |
+  |---|---|---|---|---|---|
+  | s8, flash (control, 14 Nov) | 18.74 ms | 530k cycles | 45.4 KB | 94.0 KB | 37.8 KB |
+  | **fc1 as s4, flash** | **17.41 ms (−7.1%)** | 342k | **29.6 KB** | **80.7 KB** | 37.8 KB |
+  | **s8, SRAM (control)** | **14.54 ms** | 71k | 0 | 93.9 KB | 122.9 KB |
+  | fc1 as s4, SRAM | 14.92 ms (+2.6%) | 126k | 0 | 80.6 KB | 109.5 KB |
+
+- **Reading:**
+  - From flash, halving fc1's bytes cuts the flash traffic by 35% and saves 7% overall. fc1 is 1.55x faster.
+  - From SRAM, the s4 kernel's nibble unpacking costs more than it saves: fc1 is 1.78x slower. **CMSIS-NN's best build from SRAM is still s8**, so the Gate 1 bar (14.52 ms; 14.54 ms on the re-run) and the like-for-like **4.08x** stand.
+  - From flash, CMSIS-NN's best build is now s4 (17.41 ms). Our flash-build ratios against it shrink by about 7%:
+
+    | Our build (linear layers in SRAM) | vs s8 flash | vs s4 flash |
+    |---|---|---|
+    | one core, fc1 as code (4.11 ms) | 4.55x | 4.24x |
+    | one core, hybrid (3.59 ms) | 5.22x | 4.85x |
+    | two cores, hybrid (2.27 ms) | 8.23x | 7.67x |
+
+  - These rows still keep our linear layers as code in SRAM, while CMSIS-NN reads everything from flash.
+  - **Flash traffic:** the hybrid reads 1.2 KB per inference against CMSIS-NN's 29.6 KB with s4, so 24x less, not 35x.
+  - **Flash size:** CMSIS-NN with s4 is 80.7 KB, against 46–52 KB for our all-data builds and 156–161 KB for our fastest builds (2x).
+- **Data:** `results/phase0.csv` (rows of 14 Nov), `results/profile.csv` and `results/profile_stages.csv`.
+
 ## Gate 1
 
 **Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images):
@@ -535,13 +567,13 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - With less flash than CMSIS-NN (the all-data build, 49.5 KB), it is 2.78x.
 - **Not like for like:**
   - 7.28x with both cores against CMSIS-NN's one (1.99 ms, F19). Against a perfectly parallel two-core CMSIS-NN it would be at least 3.6x.
-  - 5.22x for a one-core flash build that keeps the linear layers as code in SRAM, against CMSIS-NN entirely in flash (18.70 ms). Against CMSIS-NN from SRAM it is 4.05x.
+  - 5.22x for a one-core flash build that keeps the linear layers as code in SRAM, against int8 CMSIS-NN entirely in flash (18.70 ms). Against CMSIS-NN's best flash build (fc1 as s4, 17.41 ms, F27) it is 4.85x, and against CMSIS-NN from SRAM 4.05x.
 
 Scope (F5, F17):
 - The MNIST margin is inflated by CMSIS-NN's weak kernels for one-input-channel and depthwise convs.
 - On a wide conv, the general win from compiling ternary weights into code is 1.2x (33% zeros) to 9x (90% zeros), and it loses at 0% zeros.
 - For int4 and int8 layers mafc is only level with CMSIS-NN (F18, F24). On an all-int8 version of the model it is still 3.90x faster on one core (6.86x on two), all of it from the conv stack (F24).
-- CMSIS-NN ran with int8 weights only. Its 4-bit (s4) kernels were not tried for fc1–fc3 (F11).
+- CMSIS-NN's 4-bit (s4) kernel was tried for fc1 (F27). It is slower from SRAM, so the bar stands; from flash it is 7% faster. fc2/fc3 can't use s4 without changing the model.
 - CMSIS-NN's kernels are the ones its wrappers select. Alternatives (`arm_depthwise_conv_s8_opt`, conv1 as a depthwise conv) were not timed.
 - Energy (step 2b) is not measured yet.
 
@@ -570,7 +602,7 @@ Scope (F5, F17):
   - The story model's checkpoints were picked on the first 2 MB of its test file. lm.md also gives numbers on a held-out slice.
 - **Run-to-run timing spread:** ≤0.2% from SRAM, up to 1.2% from flash.
 - **Energy is not measured** for any build. Every claim here is about speed, size or accuracy, not efficiency.
-- **Baselines:** CMSIS-NN ran int8-only (no s4), with the kernels its wrappers select. Atome ran with its own portable engine. We re-engineered neither.
+- **Baselines:** CMSIS-NN ran int8, plus an s4 variant for fc1 (F27), with the kernels its wrappers select. Atome ran with its own portable engine. We re-engineered neither.
 - **Measurement scope:** cycles cover `ref_infer()` on core 0 only. USB transfer time and core 1's idle time are excluded.
 - **Profiling overhead:** profiling builds add about 3% (one counter read per stage, per channel). Headline numbers come from builds without it, and stage tables from builds with it.
 - **Flash state:** flash-build timings depend on the cache, and the first image after a reset is slowest. Means over 10k images absorb this; the max does not.
