@@ -12,7 +12,7 @@
 - **PC reference:** `train/atome/ref.py`, written to `results/atome_ref_seq24.json`.
   - Measured on the first 2 MB of `TinyStoriesV2-GPT4-valid.txt`, in non-overlapping windows: **1.711 bits/byte (perplexity 3.27) at a 256-byte window**, 1.791 at 64 and 1.957 at 24.
   - Greedy text matches Atome's ESP32 log exactly ("Once" → " upon a time, there ").
-  - Their training log reports perplexity 2.87 on their own random 10% split of an unknown `tinystories_full.txt`. That isn't comparable with ours, so we use V2-valid for every model.
+  - Their training log reports perplexity 2.87 on their own random 10% split of their corpus (described in their `HONEST_RESULTS.md` as TinyStories train + valid, ~1.7 GB; the release isn't stated). That isn't comparable with ours, so we use V2-valid for every model.
 - **Pico 2:** `firmware/baselines/atome` and `harness/atome_run.py`, written to `results/phase3.csv`. The window is 24, as on the ESP32.
   - **Bit-exact** with PyTorch on all 4 prompts.
   - **0.64 tok/s from flash** (1.56 s/token, 1.3 MB read from flash per token) and **0.71 tok/s from SRAM**.
@@ -33,7 +33,7 @@
 4. **Their own A/B result:** at 944K weights, the ternary model loses about 11% to a plain FP32 model.
 5. **The licence on the weights is unclear.** The code is Apache-2.0, but NOTICE says the trained weights are not part of the open-source release, while the README says they are included.
 
-**Decision (13 Nov 2026):** train our own model, MafLM, as two twins of the same size: dense feedforward and tree feedforward. Atome stays as the external yardstick, plus a KV-cache variant of its engine as a second baseline, so our speedup isn't inflated by the re-run.
+**Decision (13 Nov 2026):** train our own model, MafLM, as two twins of the same size: dense feedforward and tree feedforward. Atome stays as the external yardstick. (A KV-cache variant of its engine was planned as a second baseline and dropped on 14 Nov: it would be work on another project. Its effect is estimated instead, in "Fairness of the Atome comparison" at the end of this file.)
 
 ## MafLM (train/lm/)
 
@@ -43,7 +43,7 @@
 |---|---|---|
 | Shape | d=128, 4 layers, 4 query heads + 2 KV heads (d_head 32), FFN 128→640→128 | same, with the FFN replaced by a depth-3 tree: 7 node neurons, 8 leaves of 128→80→128 |
 | Weights | 917,504 | 921,088 |
-| Weights read per generated token | 884,864 | **315,008 (2.8x fewer)** |
+| Weights read per generated token | 884,864 | **315,008 (2.8x fewer)**; the runtime evaluates only the 3 nodes on the path, so it actually reads 312,960 |
 
 Atome has 944,640 weights.
 
@@ -73,7 +73,7 @@ Atome has 944,640 weights.
 | MafLM dense | **1.427** | 2.69 | 885K |
 | MafLM tree | **1.507** | 2.84 | 315K |
 
-- **Both twins already beat the fully trained Atome** after 3% of its token budget.
+- **Both twins already score better than the fully trained Atome on our test text** after 3% of its token budget. The test text matches our training data, and maybe not Atome's; see "Fairness of the Atome comparison".
 - The tree costs 0.08 bits/byte (5.6%) against its dense twin at this point.
 - **Load balancing works.** Leaf usage stays near uniform in all 4 layers, with entropy 2.99 of 3 bits; each leaf gets 10–16% of tokens.
 - **Greedy samples** are TinyStories-like but repetitive, as expected this early. For example, dense on "Once": "Once upon a time, there was a little boy named Tim. Tim loved to play with his friend, …".
@@ -145,7 +145,7 @@ train/lm/intref.py --npz ──► compiler/compile_lm.py (mafc/lm_backend.py) �
 | MafLM tree, SRAM | **10.3** | **97.1** | **18.2** | **55.0** | 0 |
 
 - **The tree is 2.1x faster than its dense twin from SRAM and 2.4x from flash** (positions 0–23). It reads 2.7x fewer flash bytes, in line with the 315K vs 885K weights read per token.
-- **Against Atome on the same chip, the gap is about 140x.** Most of that is the KV cache and a better kernel, not idea B, so the fair comparison needs Atome's engine with a KV cache (still to do).
+- **Against Atome's engine on the same chip, the gap is about 140x.** Most of that is Atome's engine recomputing the whole context for every token (~15x), plus a faster runtime; idea B contributes only ~2x. The breakdown is in "Fairness of the Atome comparison".
 
 **Where the time goes** (SRAM profiling builds; cycles per token):
 
@@ -241,20 +241,25 @@ What changed (all still bit-exact: the PC check and the board check pass for bot
 
 - **From SRAM, two cores give 1.6x on both twins.** Every stage gains 1.6–1.9x. The rest is handshakes (about 6 jobs per layer) and serial per-vector work on core 0.
 - **From flash, the gain is only 1.1x.** The weight stream from flash is the bottleneck, and it can't be split. To overlap it with compute, core 1 could prefetch the next layer into SRAM by DMA from the XIP stream FIFO (ideas C and G).
-- **The tree stays 2.1–2.5x faster than its dense twin in every configuration.**
+- **The tree stays faster than its dense twin in every configuration:** 2.1–2.5x over positions 0–23, and 1.65–2.2x over the whole window.
 
 ## Trained models (overnight run, 13–14 Nov 2026)
 
-`train/lm/overnight.sh` with the defaults: 61,000 steps × 128 × 256 = **2.0B bytes per twin**, the same token budget as Atome. Dense took 2 h 46 min and the tree 3 h 25 min on the PC's GPU. The best checkpoint (validation every 2,000 steps) was step 56,000 for both. Late in the cosine schedule the validation number moves by about ±0.005 between evaluations, which is the noise of a 2 MB evaluation set.
+`train/lm/overnight.sh` with the defaults: 61,000 steps × 128 × 256 = **2.0B bytes per twin**, the same number of training bytes as Atome (not the same data). Dense took 2 h 46 min and the tree 3 h 25 min on the PC's GPU. Validation ran every 2,000 steps on the first 2 MB of V2-valid. The best checkpoints were dense at step 56,000 and tree at step 54,000. Late in training the evaluation set is fixed, but the number still varies between checkpoints, by up to about 0.01 for the tree.
 
-| Model | Bits/byte (V2-valid, first 2 MB, 256 window) | Perplexity | Integer reference | Weights read per token |
-|---|---|---|---|---|
-| Atome 944K (2B tokens) | 1.711 | 3.27 | – | ~880K |
-| **MafLM dense** | **1.152** | **2.22** | 1.153 (+0.0002) | 885K |
-| **MafLM tree** | **1.206** | **2.31** | 1.206 (+0.0006) | 315K |
-| (2,000-step check models) | 1.427 / 1.507 | 2.69 / 2.84 | | |
+| Model | Bits/byte (V2-valid, first 2 MB, 256 window) | Held out: last 2 MB | Perplexity | Integer reference | Weights read per token |
+|---|---|---|---|---|---|
+| Atome 944K (2B bytes, its own data) | 1.711 | 1.721 | 3.27 | – | ~880K |
+| **MafLM dense** | **1.152** | 1.165 | **2.22** | 1.153 (+0.0002) | 885K |
+| **MafLM tree** | **1.206** | 1.219 | **2.31** | 1.206 (+0.0006) | 315K |
+| (2,000-step check models) | 1.427 / 1.507 | | 2.69 / 2.84 | | |
 
-- **Both twins beat Atome by a wide margin**, with the same token budget and slightly fewer weights: −0.56 bits/byte for the dense twin and −0.51 for the tree.
+The first 2 MB is also where our best checkpoint was picked. The last 2 MB was never used for any choice.
+
+- **On our test text both twins score well below Atome:** −0.56 bits/byte for the dense twin and −0.50 for the tree, on the held-out slice, with slightly fewer weights.
+  - Our training data matches the test text and Atome's may not.
+  - If Atome's own-split gap (0.19) is all domain shift, the lead becomes about 0.36 and 0.30.
+  - All the caveats are in "Fairness of the Atome comparison".
 - **The tree costs 0.054 bits/byte (4.7%) against its dense twin** for 2.8x fewer weights read. The gap shrank from 0.080 on the check models.
 - **The tree's routing stayed balanced** throughout the hard phase: leaf entropy 2.98–2.99 of 3 bits in every layer.
 - **The integer reference matches PyTorch to within 0.0006 bits/byte.**
@@ -268,8 +273,104 @@ What changed (all still bit-exact: the PC check and the board check pass for bot
 | Dense, SRAM | 6.77 | 147.7 | 8.56 | 116.8 | 0 |
 | Tree, flash | 8.47 | 118.0 | 10.41 | 96.1 | **82 KB** |
 | Tree, SRAM | **3.22** | **310.3** | **4.99** | **200.6** | 0 |
-| Atome, upstream engine, SRAM (window 24) | 1,414 | 0.71 | – | – | 0 |
+| Atome, upstream engine, SRAM (window 24; recomputes the context for every token) | 1,414 | 0.71 | – | – | 0 |
 
 - Speed is the same as with the check models, as expected: same architecture, same kernels.
 - **The tree is 2.1x faster than the dense twin from SRAM and 2.5x faster from flash** over positions 0–23 (1.7x and 2.2x over the whole window, where attention takes a larger share).
-- Against Atome's engine on the same board: the tree from SRAM is about 440x faster per token at window 24, and 1.7 bits/byte → 1.2.
+- **Against Atome's engine on the same board:** the tree from SRAM is about 440x faster per generated token at window 24 (about 300x if our prompt time is counted, as Atome's engine counts its own).
+  - This compares engines, not models. About 15x of it is Atome's engine recomputing the context for every token, and 1.6x is the second core.
+  - On the board, Atome can only run a 24-byte window, where it scores 1.957 bits/byte.
+  - With a cache, Atome's engine would be at about 10 tok/s (estimate, not measured), so roughly 30x.
+  - Breakdown in the next section.
+
+## Fairness of the Atome comparison (14 Nov 2026)
+
+Atome is an external yardstick, not a controlled experiment. **The controlled experiment in Phase 3 is dense twin against tree twin** (see "Caveats on the twin comparison" below). This section lists every known difference with Atome, and which way it biases the numbers.
+
+**Decision (14 Nov 2026):** we don't build or retrain anything of Atome's (no cached engine, no retraining on our data). It is their project. The comparison stays as measured, with the caveats below.
+
+### Quality (bits/byte; `train/atome/fairness.py` reproduces the table)
+
+**Same measurement for both:**
+- Byte vocabulary, cross-entropy per byte, non-overlapping 256-byte windows on the same text.
+- Atome's own `AtomeLM.loss` and `ByteTokenizer` give exactly the numbers of `train/atome/ref.py`, so the method can't explain the gap.
+- Atome also trained at a 256-byte context.
+
+| Test text | Atome | Dense | Tree |
+|---|---|---|---|
+| V2-valid, first 2 MB (the reported numbers; also our checkpoint selection set) | 1.711 | 1.152 | 1.206 |
+| **V2-valid, last 2 MB (never used for any choice)** | **1.721** | **1.165** | **1.219** |
+| V2-valid cleaned with Atome's `build_corpus.py`, first 1 MB | 1.707 | 1.153 | 1.205 |
+| Same, 1–3 MB | 1.712 | 1.156 | 1.208 |
+
+**Differences, and which way they lean:**
+1. **Training data differs** (likely favours us, size unknown).
+   - We train on TinyStories V2-GPT4 train (2.2 GB) and test on V2-GPT4 valid.
+   - Atome's `HONEST_RESULTS.md` (Table 2) gives its 944K model's corpus as "TinyStories full (train.txt + valid.txt concatenated, ~1.7 GB raw)". It doesn't say which TinyStories release. Its `REPRODUCE.md` command would instead build only 1 MB of V2-valid; we take `HONEST_RESULTS.md` as the description of the shipped model.
+   - At 2B bytes, that is about 1.2 epochs over its corpus, similar to our 0.9. So "same bytes" here also means a similar amount of distinct text.
+   - Atome's log reports 1.521 bits/byte (perplexity 2.87) on a random 10% of its own corpus, against 1.711 on ours. That 0.19 gap suggests its corpus is a different text distribution from V2-GPT4, possibly another TinyStories release.
+   - **If all of that gap is domain shift against Atome**, our lead on the held-out slice shrinks from 0.56 / 0.50 bits/byte to **0.36 (dense) / 0.30 (tree)**: 1.521 against 1.165 and 1.219. This is an adjustment, not a true bound: we never measured our twins on Atome's distribution.
+2. **Possible test-set overlap** (would favour Atome). If Atome's `valid.txt` was V2-valid, it trained on our test text. The shipped model shows no sign of that: it scores the same on V2-valid text in its own cleaned format (1.707–1.712) as on the held-out raw slice (1.721).
+3. **Checkpoint selection** (favours us, slightly).
+   - Our best checkpoints were picked out of 31 evaluations on the first 2 MB, which is also the reported test text: dense at step 56,000, tree at step 54,000.
+   - Final-step numbers: 1.157 and 1.209. The last-2 MB row above is the selection-free number.
+   - Atome's checkpoint was picked on its own split.
+4. **Activations** (favour Atome). Atome keeps float activations with LayerNorm; ours are int8 everywhere, so they can run on the integer runtime.
+5. **Hyperparameters.**
+   - Atome's are its authors' choices.
+   - Ours were fixed before the 2,000-step check runs and not changed afterwards. The check runs did evaluate on the same first 2 MB, so they were seen before the long run.
+6. **Model size:** about the same. Atome has 944,640 weights; the dense twin has 917,504 and the tree 921,088.
+
+### Speed (tokens/s on the Pico 2)
+
+Both run on the same board at 150 MHz, from SRAM and from flash, and both are bit-exact with their own references. **But this compares engines, not models**, and Atome's engine was written for portability on an ESP32, not for speed on this chip.
+
+1. **No cache in Atome's engine.** `atome_predict_next` reprocesses every token in the context to produce each new one: it resets the SSM state and keeps no key/value cache.
+   - Over our measurement (4 prompts, generating up to its compiled window of 24), the context averages 14.9 tokens, so each new token costs about 15 full positions.
+   - **This factor (~15x) comes from their engine design, not from our compiler or idea B.**
+2. **Atome only runs at a 24-byte window on the board.** Its state holds about 7 float arrays of `[window][256]`: 163 KB at 24, so about 1.7 MB at 256, more than the SRAM.
+   - At window 24, Atome scores 1.957 bits/byte, against its 1.711 at 256.
+   - So the board-speed comparison is at window 24, while the quality comparison is at 256.
+   - Our twins run the full 256 window on the board.
+3. **The prompt is timed differently.**
+   - Our tok/s counts generated tokens only. The prompt is fed through the KV cache first and timed separately.
+   - Atome's engine reprocesses the prompt inside every timed call.
+   - For the 4 prompts at window 24 (30 prompt steps beside 66 generated ones), counting our prompt time too would make ours about 1.45x slower. That turns 440x into about 300x.
+   - Over the full 256 window, the effect is negligible.
+4. **Portable float C against hand-tuned integer code.**
+   - Atome unpacks one trit at a time with branches and float adds (~17 cycles per weight) and uses one core.
+   - Ours uses activation lookup tables, SIMD and two cores, tuned for the Cortex-M33.
+   - A faster Atome engine is possible, and nobody has written it.
+5. **Split of the 440x** (MafLM tree, SRAM, two cores, positions 0–23, prompt excluded, against Atome's upstream engine, SRAM, one core, window 24; the four factors multiply to 440x):
+
+   | Factor | Ratio | Basis |
+   |---|---|---|
+   | Recompute vs cache | ~15x | Measured 1,414 ms per token ÷ 14.9 positions = ~95 ms per position, an estimate |
+   | Runtime and model at one position: Atome engine vs MafLM v1 dense, one core | ~8.6x | 95 vs 11.1 ms. Mixes kernel quality with the two architectures |
+   | Idea B: tree vs dense twin, one core | 2.2x | 11.1 vs 5.1 ms, measured on the check models |
+   | Two cores vs one | 1.6x | 5.1 vs 3.22 ms, measured |
+
+   - **Estimate, not measured:** Atome's engine with a cache would run at about 10 tok/s on this board.
+   - Against that, our dense twin on one core is about 9x faster and the tree on two cores about 30x, rather than 440x.
+   - Atome's published 1.0 tok/s is on an ESP32 at 240 MHz.
+6. **Energy was not measured** for either engine.
+
+### Caveats on the twin comparison
+
+The twins share everything that matters: the same runtime, data, budget (61,000 steps), batch order (seed 0), test text and board. Their training arguments differ only in `--ffn`. But:
+- **The tree adds training machinery:** a 30% soft-routing phase, a hardening loss and a load-balancing loss.
+  - That costs more training compute: 0.21 vs 0.16 s per step, 3 h 25 min vs 2 h 46 min.
+  - Its settings were carried over from MNIST, untuned.
+- **The tree has 3,584 more weights** (the routing nodes): 921,088 vs 917,504.
+- **Each twin's checkpoint was picked on the test text,** at different steps (54k and 56k). The quality gap agrees across views:
+  - 0.054 on the selection set;
+  - 0.054 on the held-out slice;
+  - 0.052 at the final step.
+- **One seed and one board.**
+- **The speed ratio depends on the window:**
+  - 2.1x (SRAM) and 2.5x (flash) over positions 0–23;
+  - 1.7x and 2.2x over the full 256 window, where attention, which the tree doesn't change, takes a larger share.
+
+**What to quote:**
+- **Idea B:** the tree is 2.1–2.5x faster than its dense twin over the first 24 positions, and 1.7–2.2x over the full 256 window, for +0.054 bits/byte (4.7%). One seed.
+- **Against Atome:** "on our test text, 0.50–0.56 bits/byte better (about 0.30–0.36 if Atome's own-split gap is all domain shift)". And: "~440x faster per generated token than Atome's own engine at window 24 (~300x counting the prompt); ~15x of that is the engine recomputing the context, so against an engine with a cache we estimate ~30x".

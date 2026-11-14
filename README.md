@@ -1,6 +1,6 @@
 # Model as Firmware
 
-Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model file. A compiler on the PC turns a trained ternary model (weights −1, 0, +1) into the firmware itself, using the chip's own hardware (both cores, SIMD/DSP, DMA, PIO). It is a software analogue of Taalas-style "model printed into the chip" hardware.
+Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model file. A compiler on the PC turns a trained ternary model (weights −1, 0, +1) into the firmware itself, using the chip's own hardware (both cores, SIMD/DSP and DMA so far; PIO is planned). It is a software analogue of Taalas-style "model printed into the chip" hardware.
 
 The plan starts on a Raspberry Pi Pico 2, then moves to a Pi 4 or Pi 5, and later an FPGA.
 
@@ -54,13 +54,32 @@ One inference: conv1 → dw1 → pool1 → dw2 → pool2 (run per channel, split
 
 ## Status
 
-*As of 11 Nov 2026.* Phase 0 steps 0–6 are done. Gate 0 is met on correctness and baselines; only the energy measurement (step 2b) is left. **Phase 1 has started:** the compiler ([compiler/](compiler/README.md)) generates bit-exact firmware. v0 (one core) runs at 8.18 ms from SRAM; v1 with both cores, SMLAD on all three convs and every linear layer compiled into code runs at **1.99 ms, 7.3x faster than the CMSIS-NN bar** (14.52 ms); one core against one core it is 4.1x (3.56 ms). Idea A (weights as code) is kept as a hybrid: linear layers as code, conv weights as data (FINDINGS F20). **Gate 1 is met**, with a stated scope: on a wide conv, the shape CMSIS-NN is built for, compiling ternary weights into code wins 1.2–9x once at least ~14% of weights are zero (FINDINGS F17). On an all-int8 version of the model, mafc is level with CMSIS-NN on the linear layers and 3.9x faster overall on one core, from the conv stack (FINDINGS F24). Idea B (a tree over neurons in place of fc1 + fc2) reads 6.6x fewer weights for 0.30 points of accuracy, halving the whole model when the weights stay in flash (FINDINGS F25).
+*As of 14 Nov 2026.* Phases 0, 1 and 3 are done on the Pico 2. Energy is not measured yet (see the bullets below). Every timed build matches its golden model bit for bit. All numbers come from one board, one training run per model, and the sources named. Unequal conditions are stated next to each number.
+
+**Phase 1 (MNIST, against CMSIS-NN): Gate 1 met, with a stated scope ([FINDINGS F17](notes/FINDINGS.md)).**
+- **Like for like (one core each, both from SRAM, 99.47% vs 99.44% accuracy):** the compiler's build runs in **3.56 ms against CMSIS-NN's 14.52 ms, 4.1x faster**.
+- **Two cores:** 1.99 ms. That is 7.3x CMSIS-NN, but CMSIS-NN runs on one core; against a perfectly parallel two-core CMSIS-NN it would be at least 3.6x.
+- **Memory:** that fast build uses 156 KB of flash and 161 KB of SRAM, against CMSIS-NN's 94 KB and 127 KB. Compiling weights into code costs space.
+- **Much of the MNIST lead comes from CMSIS-NN handling this model's shape badly** (a one-input-channel first conv and depthwise convs; F5).
+- **On a wide conv, the shape CMSIS-NN is built for:** one synthetic layer with random ternary weights. Ternary-as-code breaks even at about 14% zero weights, wins 1.19x at 33% and 9x at 90%, and loses (0.86x) when no weights are zero (F17).
+- **On an all-int8 version of the model:** level with CMSIS-NN on the linear layers, and 3.9x faster on one core overall, all of it from the conv stack (F24).
+- **Idea A** (weights as code) is kept as a hybrid: linear layers as code, conv weights as data (F20).
+- **Idea B** (a tree over neurons in place of fc1 + fc2; Belcak & Wattenhofer's fast feedforward networks), one training run:
+  - Reads 6.6x fewer weights, for 0.30 points of accuracy (99.15% vs 99.45%).
+  - The whole model gains little: 9% from SRAM. From flash it halves the time only against the twin with every layer stored as data in flash; against the twin's best flash build, it is 4% faster on one core and slower on two (F25).
+
+**Phase 3 (a tiny story model): our own ternary byte-level model, MafLM, in dense and tree twins ([notes/lm.md](notes/lm.md), F26).**
+- **The controlled comparison is twin against twin:** same runtime, data, budget and test text. The tree is **2.1x faster from SRAM and 2.5x from flash** (two cores, first 24 positions; 1.7x and 2.2x over the full 256 window), for +0.054 bits/byte (4.7%).
+- **The tree runs at 310 tok/s** from SRAM on two cores over the first 24 positions, and 201 tok/s over the full 256-byte window.
+- **Atome LM** (the published ternary story model) is an outside reference point only:
+  - On our test text, both twins score 0.50–0.56 bits/byte better. If Atome's lower loss on its own data is all domain shift, the lead is about 0.30–0.36.
+  - Atome's own engine runs at 0.71 tok/s on the same board. That speed gap compares engines, not models: about 15x of it is Atome's engine recomputing the context for every token, and our tok/s excludes the prompt. See "Fairness of the Atome comparison" in [notes/lm.md](notes/lm.md).
 
 - **Gate 0 results ([results/](results/README.md)):** the plain-C reference on the Pico 2 is bit-exact with its golden model on all 10,000 test images: 99.47% accuracy, 10.21 ms per image (9.52 ms from SRAM). The CMSIS-NN int8 baseline with the same weights gets 99.44% at 18.70 ms (14.52 ms from SRAM). 14.52 ms is the speed bar for Gate 1.
-- **Hardware:** one Pico 2 with headers, a micro-USB data cable, a USB power meter and a Pi 4. A Debug Probe and a USB-C cable for the meter are on order. Until they arrive, flashing and the test link both go over the Pico's own USB.
-- **Bring-up ([firmware/rp2350/hello/](firmware/rp2350/hello/)):** the firmware builds, flashes with `picotool` and prints over USB serial. The cycle counter reads 150,251 cycles for 1 ms at 150 MHz, and repeated runs vary by ±108 cycles out of 700k.
-- **Training ([train/](train/README.md)):** BitNetMCU's ternary MNIST CNN reaches 99.45% final and 99.48% best, against 99.52% reported. Variants with 70% and 90% of the ternary-layer weights forced to zero lose no accuracy (99.44% and 99.50%).
-- **Waiting on parts:** the energy check (step 2b) needs the USB-C cable for the power meter. The tooling is ready: `harness/measure.sh energy results/energy.csv <build specs>` (see [harness/](harness/README.md)).
+- **Hardware:** one Pico 2 with headers, a Debug Probe (flashing over SWD), a USB power meter and a Pi 4.
+- **Energy is not measured.** The USB meter reads only 0–4 mA, in 1 mA steps, for the Pico 2, so energy needs a finer instrument (an INA226 breakout or a Nordic PPK2). The tooling is ready: `harness/measure.sh energy` (see [harness/](harness/README.md)). Until then, no claim here is about efficiency, only speed.
+- **Bring-up ([firmware/rp2350/hello/](firmware/rp2350/hello/)):** the cycle counter reads 150,251 cycles for 1 ms at 150 MHz, and repeated runs vary by ±108 cycles out of 700k.
+- **Training ([train/](train/README.md)):** BitNetMCU's ternary MNIST CNN reaches 99.45% at the final epoch, against the 99.52% BitNetMCU reports. Our best epoch, 99.48%, was picked on the test set, so it is not a clean number. Variants with 70% and 90% of the ternary-layer weights forced to zero reach 99.44% and 99.50% (one run each).
 
 ## Watch it run
 
@@ -100,6 +119,6 @@ Options and details are in [harness/README.md](harness/README.md#watching-a-run-
 
 ## Next steps
 
-1. When the cable arrives: step 2b (energy per inference), which completes Gate 0.
-2. Phase 1: compiler v0, then idea A (all-code, all-data and hybrid builds), measured against the 14.52 ms CMSIS-NN bar.
-3. Targets found by profiling: ternary decoding (about 8 cycles per weight) and the conv stack (about 70% of the time).
+1. Close Phase 3: a Gate 3 write-up and the PR to `main`.
+2. A model larger than SRAM on the Pico 2, where flash traffic sets the speed (ideas B, C and G together).
+3. Energy per inference, once a finer current meter is available.

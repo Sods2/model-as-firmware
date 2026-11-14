@@ -4,10 +4,10 @@
 
 | # | Idea | Status | Related plan idea |
 |---|---|---|---|
-| U1 | Cache placement: keep the most-used data in fast memory | Proposed; U3 results say test fc1-weights-in-SRAM first | G (SRAM cache), C (DMA) |
-| U2 | Make weight unpacking cheaper | Proposed | A, E |
+| U1 | Cache placement: keep the most-used data in fast memory | fc1 in SRAM done (as code, F16); a general cache over flash (idea G) waits for a model larger than SRAM | G (SRAM cache), C (DMA) |
+| U2 | Make weight unpacking cheaper | Done: code formats (F16, F18) and activation lookup tables in the story-model runtime (notes/lm.md, runtime v1) | A, E |
 | U3 | Split cores by data residency (one computes, one loads) | Step 1 tested 11 Nov: contention is moderate on convs, strong on fc1 (see U3). Step 2 waits for a model larger than SRAM | C, G |
-| U4 | Weights as add/subtract instructions | Liked; this is idea A, next after v1 | A |
+| U4 | Weights as add/subtract instructions | Done: idea A, kept as a hybrid (F16, F20) | A |
 
 ---
 

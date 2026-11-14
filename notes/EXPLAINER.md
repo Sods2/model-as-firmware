@@ -1,10 +1,10 @@
 # How this project works, from zero
 
-*A plain-language guide, written 11 Nov 2026. This is a living document: update the numbers and add sections as the project moves on. Exact figures live in [results/README.md](../results/README.md) and the analysis in [FINDINGS.md](FINDINGS.md).*
+*A plain-language guide, written 11 Nov 2026, numbers updated 14 Nov 2026. This is a living document: update the numbers and add sections as the project moves on. Exact figures live in [results/README.md](../results/README.md) and the analysis in [FINDINGS.md](FINDINGS.md).*
 
 ## 1. The goal in one sentence
 
-Take a small AI model that recognises handwritten digits and turn it into the firmware of a $5 chip, with no operating system and no AI library in between, so that it runs as fast and efficiently as possible.
+Take a small AI model that recognises handwritten digits and turn it into the firmware of a $5 chip, with no operating system and no AI library in between, so that it runs as fast as possible. (Efficiency, meaning energy per answer, is a goal too, but it hasn't been measured yet: the power meter on hand is too coarse.)
 
 ## 2. What a "model" is
 
@@ -72,22 +72,36 @@ A Python script that talks to the Pico over USB. For each image it:
 ### The CMSIS-NN baseline (step 5): the bar to beat
 CMSIS-NN is ARM's official, optimised AI library for this kind of chip. To claim our approach is faster, we must beat *it*, not just our own slow code. It runs **the same model with the same weights**, as standard 8-bit numbers.
 
+To be fair to it: CMSIS-NN has no ternary or 4-bit kernels, so it has to run weights 4x or more larger than ours, and its kernels happen to be weak for this model's unusual shape (a first layer with one input channel, and depthwise convolutions). Part of our lead comes from that, not from our method; see FINDINGS F5 and F17.
+
 ## 7. Results so far
 
-| Build | From flash | From SRAM |
-|---|---|---|
-| CMSIS-NN (ARM's library) | 18.70 ms | **14.52 ms**, the bar |
-| Our plain-C reference | 10.21 ms | 9.52 ms |
-| Our compiler v0 | 9.33 ms | 8.83 ms, 1.64× faster than the bar |
+Digit recognition (MNIST), one image, time per answer. All builds give bit-exact answers on all 10,000 test images.
 
-"From SRAM" means the whole program is copied into fast memory at start-up, so there are no flash waits. Dual-core (v1) results go here once they're measured.
+| Build | Cores | From flash | From SRAM |
+|---|---|---|---|
+| CMSIS-NN (ARM's library), 99.44% | 1 | 18.70 ms | **14.52 ms**, the bar |
+| Our plain-C reference, 99.47% | 1 | 10.21 ms | 9.52 ms |
+| Our compiler v0 | 1 | 8.66 ms | 8.18 ms |
+| Our compiler, best build, 99.47% | **1** | 3.58 ms | **3.56 ms, 4.1× the bar (the fair comparison)** |
+| Our compiler, best build | 2 | 2.27 ms | 1.99 ms (7.3× the bar, but the bar uses one core) |
+
+"From SRAM" means the whole program is copied into fast memory at start-up, so there are no flash waits.
+
+Things to keep in mind:
+- **The fair number is one core against one core: 4.1×.** CMSIS-NN only uses one core.
+- **Our fast builds use more memory:** 156–161 KB of flash and 129–164 KB of SRAM, against CMSIS-NN's 94 KB and 33–127 KB. Turning weights into instructions costs space.
+- **Our "from flash" builds still keep the linear layers in SRAM**, while CMSIS-NN's flash build reads everything from flash.
+- **On one wide layer, the shape CMSIS-NN is built for,** our approach only wins when enough weights are zero: it breaks even at about 14% zeros and loses when no weights are zero (FINDINGS F17).
+
+For the tiny story model (Phase 3), see [lm.md](lm.md). There, the fair comparison is our model's two versions against each other (the tree version is 2.1–2.5× faster over the first 24 letters, 1.7–2.2× over a full 256-letter window). The comparison with the published Atome model has caveats that are spelled out in that file.
 
 ## 8. What profiling (timing each layer separately) taught us
 
 1. **Memory traffic matters, which is the project's core idea.** CMSIS-NN stores fc1's weights as 8-bit numbers: 30 KB. That doesn't fit the 16 KB flash cache, so the layer is **7.4× slower from flash than from SRAM**. Our packed ternary version of fc1 is only 6 KB, fits the cache, and barely cares where it lives.
-2. **Unpacking ternary weights costs time:** about 8 cycles per weight. Once memory isn't the problem (in SRAM), CMSIS-NN's 8-bit fc1 is faster than ours. A clear target.
+2. **Unpacking ternary weights costs time:** about 8 cycles per weight. Once memory isn't the problem (in SRAM), CMSIS-NN's 8-bit fc1 was faster than ours. *(Fixed later: compiled into instructions, our fc1 takes 50k cycles against CMSIS-NN's 71k; F16, F17.)*
 3. **The convolutions take about 70% of the time,** so they're the main target.
-4. **Zeros alone don't buy speed.** The 70% and 90% zero models are only about 1% faster, because the current format still unpacks every weight. Skipping zeros needs a different format.
+4. **Zeros alone don't buy speed.** The 70% and 90% zero models are only about 1% faster, because the current format still unpacks every weight. Skipping zeros needs a different format. *(Done later: compiled into instructions, zero weights simply disappear, and the 90% zero model's fc1 runs 12× faster; F16.)*
 
 ## 9. The compiler (Phase 1)
 
@@ -108,10 +122,10 @@ It was checked bit-exact at three levels: Python, the C on the PC, and the C on 
 
 ## 10. Where it's going next
 
-- **v1, both cores:** the convolution channels are split between the two cores (core 1: channels 0–39, core 0: 40–79), and so are the big fc layers.
-- **Dual 16-bit multiplies:** the chip can do two 16-bit multiplications in one step. A worst-case maths check proved this is exact for dw1.
-- **Idea A:** turn the ternary weights directly into add/subtract instructions instead of unpacking them at run time.
-- **Energy per inference:** needs the USB-C cable for the power meter.
+Done since this guide was first written: both cores, dual 16-bit multiplies, idea A (weights as instructions), the tree layer (idea B), weight streaming (idea C), and a tiny story-writing model (Phase 3). Still open:
+
+- **Energy per inference:** needs a finer current meter than the USB one on hand.
+- **A model bigger than the chip's fast memory,** where reading from flash sets the speed.
 
 Your own ideas and questions are tracked in [IDEAS.md](IDEAS.md).
 

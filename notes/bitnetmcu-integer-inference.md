@@ -4,7 +4,7 @@
 
 ## Licence: why we don't copy BitNetMCU's C code
 
-BitNetMCU is **GPL-3.0**. Copying `BitNetMCU_inference.c` into this repo would make our firmware GPL-3 too. So [firmware/baselines/ref_c/ref_infer.c](../firmware/baselines/ref_c/ref_infer.c) is our own implementation of the same integer arithmetic (the arithmetic is an algorithm, not copyrightable text). It is bit-exact with the upstream engine by construction. The exported model headers in `train/export/` are data produced by their `exportquant.py`.
+BitNetMCU is **GPL-3.0**. Copying `BitNetMCU_inference.c` into this repo would make our firmware GPL-3 too. So [firmware/baselines/ref_c/ref_infer.c](../firmware/baselines/ref_c/ref_infer.c) is our own implementation of the same integer arithmetic (the arithmetic is an algorithm, not copyrightable text). It is written to reproduce the upstream C arithmetic; it was not run against upstream's `BitNetMCU_inference.c` (it is checked bit-exact against our own golden model). Upstream reports 99.52% for this model; our training run reached 99.45% at the final epoch (one seed). The exported model headers in `train/export/` are data produced by their `exportquant.py`.
 
 ## The model (CNNMNIST, `cnn_width` 80)
 
@@ -19,7 +19,7 @@ BitNetMCU is **GPL-3.0**. Copying `BitNetMCU_inference.c` into this repo would m
 | fc2 96 -> 64 | `L13` | | 4bitsym, 8 per `uint32_t` |
 | classifier 64 -> 10 | `L15` | | 4bitsym |
 
-- **No layer has a bias** (`bias=False` in BitLinear and BitConv2d), and every non-linearity is ReLU or max-pool. The network is therefore *positively homogeneous*: scaling the input by a positive number scales every layer's output by the same amount, so per-sample normalizations (RMS norm, the dynamic shifts below) never change the argmax. This is what lets a static-scale int8 build (CMSIS-NN) run the very same weights as the "same network".
+- **No layer has a bias** (`bias=False` in BitLinear and BitConv2d), and every non-linearity is ReLU or max-pool. The network is therefore *positively homogeneous*: scaling the input by a positive number scales every layer's output by the same amount, so per-sample normalizations (RMS norm, the dynamic shifts below) never change the argmax in exact arithmetic. Rounding and clipping in the integer pipelines do change a few predictions: CMSIS-NN agrees with PyTorch on 99.91% of test images, and our pipeline on 99.98%. This is what lets a static-scale int8 build (CMSIS-NN) run the very same weights as the "same network".
 - Flatten order is PyTorch NCHW: feature index = `channel*4 + y*2 + x`.
 
 ## Weight packing formats

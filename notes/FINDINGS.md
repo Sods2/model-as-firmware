@@ -1,6 +1,6 @@
 # Findings so far
 
-*Consolidated 11 Nov 2026, covering Phase 0 and Phase 1 up to compiler v1 (dual core), the core-contention test, SMLAD on all three convs, and four fc1 weight formats (fc1 as code). One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
+*Consolidated 11 Nov 2026 and extended since (F1–F26: Phase 0, Phase 1 with ideas A–C, and the Phase 3 story model). Fairness review 14 Nov 2026: every comparison states its conditions, and the caveats that apply everywhere are in "Caveats" at the end. One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
 
 Setup for all numbers:
 - **Board and clock:** Raspberry Pi Pico 2 (RP2350, Cortex-M33) at 150 MHz.
@@ -10,7 +10,7 @@ Setup for all numbers:
 
 ## Headline numbers (tern80)
 
-| Build | Where | Latency | Cycles | vs CMSIS-NN, same memory | Flash | RAM | Data |
+| Build | Where | Latency | Cycles | vs CMSIS-NN in the same column† | Flash | RAM | Data |
 |---|---|---|---|---|---|---|---|
 | CMSIS-NN int8 | flash | 18.70 ms | 2.81M | 1.00x | 93.6 KB | 33.5 KB | `results/phase0.csv` |
 | CMSIS-NN int8 | SRAM | 14.52 ms | 2.18M | 1.00x | 93.5 KB | 127.0 KB | `results/phase0.csv` |
@@ -35,11 +35,13 @@ Setup for all numbers:
 | mafc v1 + SMLAD + linear as code + shared kernel (two cores) | flash, linear in SRAM | 2.27 ms | 0.34M | 8.23x | 156.5 KB | 129.2 KB* | `results/phase1.csv` |
 | **mafc v1 + SMLAD + linear as code + shared kernel (two cores)** | **SRAM** | **1.99 ms** | **0.30M** | **7.28x** | 156.4 KB | 161.1 KB* | `results/phase1.csv` |
 
+† Same place, not always the same conditions. Two-core rows are compared against one-core CMSIS-NN. In the "linear in SRAM" / "fc1 in SRAM" rows, mafc keeps those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM). Against CMSIS-NN from SRAM (14.52 ms), those rows are 3.5x (4.11 ms), 5.0x (2.89 ms), 4.05x (3.59 ms), 6.2x (2.35 ms) and 6.4x (2.27 ms). The fair one-core, same-memory figure is **4.08x**. The faster builds also use more flash than CMSIS-NN (156–161 KB vs 94 KB). CMSIS-NN ran with int8 weights throughout, although it also has 4-bit (s4) kernels; see F11.
+
 \* RAM counted the new way (from 11 Nov, F16): every section linked at an SRAM address, excluding heap and stacks. The older rows used data + bss (+ text for SRAM builds). That overstated SRAM builds by about 5–6 KB, understated flash builds by about 2 KB, and would have missed code placed in SRAM entirely.
 
 All mafc rows were re-measured on 11 Nov with the branch-free ReLU (F14), which sped up every mafc build. The SMLAD rows are the v2 kernel (F15: conv1 on SMLAD too, no repacking, ReLU as one `USAT`). The earlier numbers (v0 8.83 ms, v1 4.80 ms, v1 + SMLAD 4.36 → 4.23 ms from SRAM) are in F13/F14, `results/phase1.csv` (the `notes` column says which version) and `results/README.md`.
 
-The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our two-core rows compare two cores with one; one core against one core, the best is 3.56 ms = **4.08x** (F17, F18). Accuracy: 99.47% for every ternary-pipeline build and 99.44% for CMSIS-NN, against 99.45% for the PyTorch model. Energy is **not measured yet** (step 2b, waiting for the USB-C cable).
+The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our two-core rows compare two cores with one; one core against one core, the best is 3.56 ms = **4.08x** (F17, F18). Accuracy: 99.47% for every ternary-pipeline build and 99.44% for CMSIS-NN, against 99.45% for the PyTorch model. Energy is **not measured yet**: the USB meter is too coarse for the Pico 2, so step 2b needs a finer instrument. **Run-to-run spread** on repeated builds of the same code: ≤0.2% from SRAM, up to 1.2% from flash (`results/phase1.csv`), so differences of a few percent between flash builds are near the noise.
 
 ## Findings
 
@@ -65,7 +67,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 
 ### F5. The conv stack dominates, and CMSIS-NN handles this shape badly
 - **Evidence:** the conv layers are about 70% of single-core cycles in every build. CMSIS-NN's conv1 (1 input channel → 80) takes 1.07M cycles against 0.47M for mafc. Its depthwise 3x3 takes 0.82M against 0.45M.
-- **Meaning:** much of our 1.5–3x lead over CMSIS-NN comes from this model's unusual shape (a single-input-channel first layer, depthwise convs). That is a weakness of the baseline more than a strength of our method. **Don't overclaim at Gate 1.** Test on a wide-channel model too before drawing general conclusions. *(Done in F17: on a wide conv, ternary-as-code still wins once at least ~14% of weights are zero.)*
+- **Meaning:** much of our lead over CMSIS-NN (1.5–3x when this was written; 4.1x one core against one core by F18) comes from this model's unusual shape (a single-input-channel first layer, depthwise convs). That is a weakness of the baseline more than a strength of our method. **Don't overclaim at Gate 1.** Test on a wide-channel model too before drawing general conclusions. *(Done in F17: on a wide conv, ternary-as-code still wins once at least ~14% of weights are zero.)*
 
 ### F6. Specialising everything isn't automatically faster
 - **Evidence:** mafc v0's constant-size loops made conv1 34% faster (it reads the int8 image directly instead of widening it per channel) but dw1 12% slower, with the same arithmetic. Everything was inlined in both builds, so the difference is gcc's unrolling and register pressure on the M33.
@@ -78,7 +80,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 
 ### F8. The network is positively homogeneous, which makes the int8 baseline fair
 - **Evidence:** there are no biases, and only ReLU and max-pool non-linearities. So a static-scale int8 build (CMSIS-NN, calibrated on training images only) runs the *same* integer weights as the same network: 99.44% accuracy, bit-exact with its own golden model.
-- **Meaning:** the speed comparison against CMSIS-NN is apples to apples. The same property would let the compiler swap BitNetMCU's per-image shifts for static scales if that ever helps.
+- **Meaning:** both compute the same function, so the speed comparison against CMSIS-NN compares like with like in arithmetic. Weight storage differs: int8 for CMSIS-NN, packed or code for us, and that is part of what is compared (see F11). The same property would let the compiler swap BitNetMCU's per-image shifts for static scales if that ever helps.
 
 ### F9. Int16 bounds decide where SIMD is provably exact *(corrected 11 Nov)*
 - **Evidence (exact interval analysis, `compiler/mafc/bounds.py`):** for tern80, conv1 outputs are ≤ 2,643, dw1 and pool1 outputs ≤ 19,743, and dw2 outputs ≤ 132,087. The largest observed over 20k images are 1,969, 5,658 and 12,094. So conv1, dw1 and pool1 fit int16 provably, and **both dw1 and dw2 can use SMLAD exactly**. dw2's output doesn't fit int16.
@@ -89,8 +91,13 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 - **Evidence:** the max over 10k images is within 0.1% of the mean from SRAM. From flash it is +6% (ref_c), +7% (mafc v0) and **+13% (mafc v1 dual)** above the mean.
 - **Meaning:** cache misses make flash builds both slower and jittery, and the second core makes it worse. That matters for any real-time claim.
 
-### F11. CMSIS-NN uses about 2x the flash of the ternary builds
-- **Evidence:** about 94 KB vs about 46–49 KB. Weights: about 39 KB unpacked int8 vs about 11 KB packed. The CMSIS-NN library code is the rest.
+### F11. CMSIS-NN uses about 2x the flash of the all-data ternary builds, but less than our fastest builds
+- **Evidence:** about 94 KB vs about 46–52 KB for the all-data builds. Weights: about 39 KB unpacked int8 vs about 11 KB packed. The CMSIS-NN library code is the rest.
+- **But** the fastest (hybrid) builds use 156–161 KB, **about 1.7x CMSIS-NN's flash**: code costs space (F16).
+- **Caveat on the baseline:** the CMSIS-NN build uses int8 kernels throughout.
+  - Its source (the pinned commit in `firmware/baselines/cmsis_nn/third_party/CMSIS-NN`) also has 4-bit packed (s4) kernels: `arm_fully_connected_s4`, `arm_convolve_s4` and `arm_depthwise_conv_s4`.
+  - fc1 (ternary) and fc2/fc3 (int4) could run as s4. That would halve fc1 to 15 KB, close to the 16 KB XIP cache, and cut CMSIS-NN's flash size and flash traffic. Its SRAM speed would probably not improve, since s4 unpacks at run time.
+  - **An s4 variant was not built or measured.** So CMSIS-NN's flash penalty (F2, F22) is partly a result of our int8-only choice.
 
 ### F12. The two cores slow each other down, mostly through flash, and mostly in fc1
 - **Evidence:** in the dual-core build, each core's half of the conv layers takes longer than half the single-core time: **+6–8% from SRAM**, **+12–16% from flash** (core 0 / core 1). The join wait is 21k cycles from flash against 12k from SRAM. On fc1, the flash penalty is +18.5% with one core and **+54.6% with two**. Repeats agree within 0.1–1%.
@@ -199,11 +206,11 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 - **The baseline is CMSIS-NN at its best for these shapes:**
   - Built with `-O3 -mcpu=cortex-m33 +dsp`, so `ARM_MATH_DSP` is on.
   - The wrappers pick the dedicated `arm_depthwise_conv_3x3_s8` for dw1/dw2.
-  - conv1 uses im2col + SMLAD (`arm_convolve_s8`); CMSIS-NN has no faster path for one input channel.
+  - conv1 uses im2col + SMLAD (`arm_convolve_s8`); the library's wrapper selects it, and we found no dedicated path for one input channel. An alternative (conv1 as a depthwise conv with channel multiplier 80) was not timed.
   - Nothing to fix there.
 - **Cores:** CMSIS-NN uses one core. The headline 6.25x compares two cores with one.
   - One core against one core (both from SRAM): **3.87 ms vs 14.52 ms = 3.75x**.
-  - A hypothetical perfectly parallel two-core CMSIS-NN (≥ 7.26 ms) would still be ≥ 3.1x slower than our two-core 2.32 ms.
+  - A hypothetical perfectly parallel two-core CMSIS-NN (≥ 7.26 ms) would still be ≥ 3.1x slower than our two-core 2.32 ms (≥ 3.6x against 1.99 ms after F19).
 - **Per layer, one core, SRAM (stage cycles, image 0; CMSIS-NN against mafc v0 + SMLAD + fc1 as code):**
 
   | Stage | CMSIS-NN | mafc | mafc faster by |
@@ -239,7 +246,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - The code kernel costs about 2.5 cycles per nonzero weight per output pixel, so its time is proportional to the nonzeros. Break-even is at about **14% zeros**.
   - From flash, CMSIS-NN slows down by 3–50%. The code kernel was in SRAM in both builds, so the flash rows are not a like-for-like comparison and aren't used here.
 - **Meaning and limits:**
-  - Our method is not a trick of the MNIST shape. On CMSIS-NN's home ground it wins for ternary layers with typical sparsity (BitNet-style ternary layers are often 30–50% zeros), and it wins big with pruning.
+  - Our method is not a trick of the MNIST shape. On CMSIS-NN's home ground it wins for ternary layers with typical sparsity (our own tern80 fc1 is 50% zeros under the BitNet absmean rule; the sparsity of other ternary models will vary), and it wins big with pruning.
   - It loses on dense ternary layers (about 1.16x). For int4 layers, mafc's fc2/fc3 were 3.6x slower than CMSIS-NN. Compiled into code they are about level (fc2 0.96x, fc3 0.71x; F18), but not ahead.
   - It only applies to ternary (multiply-free) weights. An int8 model would need multiplies, and CMSIS-NN's SMLAD path would be the bar.
   - The code costs memory: about 6 bytes per nonzero weight (55 KB for the dense 9,216-weight layer), which must sit in SRAM to be fast (F16).
@@ -307,7 +314,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   | Flash used | 52 KB | 156 KB | 197 KB |
 
 - **Against the keep criterion** ("hybrid ≥ the faster of the other two, with less flash"):
-  - The hybrid is the fastest from flash by 1.9–2.8x.
+  - The hybrid is the fastest from flash: 1.7–1.9x faster than all-data and 1.8–3.0x faster than all-code.
   - It ties all-code from SRAM (within 2%), with 41 KB less flash than all-code.
   - It uses 3x the flash of all-data, but it is 1.5–1.9x faster.
   - **Keep.**
@@ -365,7 +372,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   The two-core hybrid SRAM build reads nothing from flash (0 accesses), as expected.
 - **Reading:**
   - Hit rates are 98.4–99.96% everywhere, so hits are cheap. The misses set the flash penalty, at roughly 65–110 cycles per 8-byte line (≈ 8–14 cycles per byte). That is a bit worse than the 6.7 cycles/byte of sequential streaming (F21), because misses are scattered.
-  - The hybrid reads **35x less** from flash than CMSIS-NN (1.2 vs 45.5 KB). That is why its flash build runs within 1% of its SRAM build, while CMSIS-NN loses 29%.
+  - The hybrid reads **35x less** from flash than CMSIS-NN (1.2 vs 45.5 KB). That is why its flash build runs within 1% of its SRAM build, while CMSIS-NN loses 29%. Caveat: the hybrid gets there by keeping its linear layers as code in SRAM (134 KB of RAM against CMSIS-NN's 38 KB), and CMSIS-NN's traffic would shrink with its s4 kernels, which we didn't use (F11).
   - All-code reads 49 KB. The conv functions' code doesn't fit the cache, which confirms F20's explanation with a direct measurement.
   - With two cores, the all-data build misses 32% more than with one (13.1 vs 9.9 KB): the cores evict each other's lines, as F12 suspected.
 - **Meaning:** "bytes read from flash per inference" (a metric in the logging table since Phase 0) is now measured for every flash build. For MNIST it confirms the premise: what the compiler places in SRAM, and what it keeps compact, decides flash traffic, and flash traffic decides the flash penalty.
@@ -419,7 +426,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   | ref_c | 8.74 ms | 10.63 ms | 12.0 KB | 40.9 KB |
   | mafc one core, plain int8 loop | 4.97 ms | | | |
   | **mafc one core, dense** | **3.73 ms (3.90x)** | 7.97 ms | 13.0 KB | 44.9 KB |
-  | mafc one core, code (in SRAM) | 3.82 ms | **3.85 ms (4.87x)** | 225 KB | 1.2 KB |
+  | mafc one core, code (in SRAM) | 3.82 ms | **3.85 ms (4.87x; linear layers in SRAM vs CMSIS-NN all in flash; 3.78x vs CMSIS-NN from SRAM)** | 225 KB | 1.2 KB |
   | mafc one core, dense streamed (`--stream`) | | 4.95 ms (3.79x) | 23.7 KB | 1.6 KB + 37 KB streamed |
   | **mafc two cores, dense** | **2.12 ms (6.86x)** | 7.11 ms | 14.5 KB | 47.9 KB |
   | mafc two cores, code (in SRAM) | 2.13 ms | 2.44 ms | 222 KB | 1.35 KB |
@@ -434,7 +441,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - Whole model, one core, SRAM: fc1 as code with fc2/fc3 dense is 3.56 ms, equal to the hybrid with everything as code (3.56 ms), and its binary is 24 KB smaller (136.8 against 160.8 KB).
 - **Meaning:** the right format depends on the weight type. Ternary: code (zeros become speed, F16). int4: dense or code (a tie). int8: dense in SRAM; in flash builds, code in SRAM if there is room, otherwise streamed. mafc's general advantage on int8 layers is small; its large wins are the conv kernels (F5) and weights with many zeros (F17).
 
-### F25. Idea B: a tree layer reads 6.6x fewer weights and runs 3.8-6.2x faster than its dense twin, for 0.30 points of accuracy (keep)
+### F25. Idea B: a tree layer reads 6.6x fewer weights and runs 3.4–6.2x faster than its dense twin, for 0.30 points of accuracy (keep)
 - **Model `fff80`:** tern80 with its fc1 + fc2 block (320 → 96 → 64) replaced by a fast feedforward tree (Belcak & Wattenhofer 2023) of the same training width.
   - Depth 3: 7 routing nodes (one int8 neuron each, no bias) choose one of 8 leaves.
   - Each leaf is 320 → 12 (ternary) → relu_norm → 64 (int4), like fc1 and fc2. 8 × 12 = 96, so tern80 is the dense twin.
@@ -463,15 +470,20 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 
   | Whole model (10k images) | Dense twin (tern80) | Tree (fff80) |
   |---|---|---|
-  | One core, SRAM, best (twin: code + code; tree: code + dense) | 3.56 ms | **3.23 ms** (4.50x CMSIS-NN) |
+  | One core, SRAM, best (twin: code + code; tree: code + dense) | 3.56 ms | **3.23 ms** (4.50x CMSIS-NN, but at lower accuracy: 99.15% vs 99.44%) |
   | One core, SRAM, dense | 3.73 ms | 3.26 ms |
   | One core, flash, dense | 8.05 ms, 45.0 KB read from flash | **4.09 ms, 10.7 KB** |
   | One core, flash, fc1/leaf-in as code | 4.11 ms | 3.45 ms |
-  | Two cores, SRAM (twin: hybrid code + code; tree: code + dense, tree on core 0) | 1.99 ms | **1.86 ms** (7.79x CMSIS-NN) |
+  | Two cores, SRAM (twin: hybrid code + code; tree: code + dense, tree on core 0) | 1.99 ms | **1.86 ms** (7.79x CMSIS-NN; two cores vs one, and lower accuracy) |
   | Two cores, flash (same formats) | 2.28 ms | 2.57 ms* |
 
   \* The tree's int4 layers (leaf out, fc3) were dense in flash here, while the twin had every linear layer as code in SRAM (1.3 KB read from flash against 6.3 KB). It is a format difference, not a tree effect; tree + code + code from flash was not measured.
 
+- **Caveats:**
+  - One training run (seed) per model.
+  - The load-balancing fix was chosen after looking at test accuracy (MNIST has no separate validation split here).
+  - The integer builds that were timed differ by 0.32 points (99.47% → 99.15%); 0.30 is the PyTorch figure.
+  - The stage speedups come from test image 0. The tree's cost depends on the leaf reached; over 200 images, the whole-model saving gives about 3.7x for the replaced layers rather than 3.8x.
 - **Keep criterion** (HANDOFF: ≥3x fewer bytes and lower latency for the tree layers, <1 point accuracy loss): **met.** 6.6x fewer weights read, 3.4–6.2x faster, −0.30 points.
 - **Reading:**
   - For MNIST the whole-model gain is small from SRAM (9%), because fc1 + fc2 were only about 13% of the time; the conv stack dominates.
@@ -479,12 +491,12 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - That is the case idea B is for: models whose feedforward weights don't fit in SRAM, where flash traffic sets the speed (F22). The next test is the tiny story model (HANDOFF section 7), where feedforward layers dominate.
   - Training needs care: without load balancing the tree collapses silently, and the soft-phase accuracy hides it (hard routing must be what is evaluated).
 
-### F26. Phase 3: our own ternary story model beats Atome by 0.5 bits/byte; its tree twin runs at 310 tok/s on the Pico 2, 2.1–2.5x faster than the dense twin for 4.7% in bits/byte
+### F26. Phase 3: the tree twin of our ternary story model runs at 310 tok/s on the Pico 2 over the first 24 positions (201 over the 256 window), 2.1–2.5x faster than its dense twin (1.7–2.2x over the full window) for 4.7% in bits/byte; on our test text both score 0.5 bits/byte better than Atome (caveats below)
 - **Models:** MafLM (`train/lm/`), d=128, 4 layers, GQA + ALiBi, byte vocabulary, all linear layers ternary with int8 activations. The dense twin has a 128 → 640 → 128 feedforward layer; the tree twin has a depth-3 fast feedforward tree with 8 leaves of 80, the same total width. About 0.92M weights each, like Atome's 944K.
-- **Training:** 2B bytes each on TinyStories V2, Atome's budget (overnight, 2 h 46 min and 3 h 25 min).
-- **Quality** (bits/byte on V2-valid, first 2 MB, 256-byte window):
-  - Atome: 1.711.
-  - **Dense: 1.152. Tree: 1.206.**
+- **Training:** 2B bytes each on TinyStories V2-GPT4 train: the same number of bytes as Atome, not the same data. Overnight: 2 h 46 min (dense) and 3 h 25 min (tree).
+- **Quality** (bits/byte, 256-byte window, on V2-valid: first 2 MB, then the last 2 MB, which was never used for checkpoint selection):
+  - Atome: 1.711 / 1.721.
+  - **Dense: 1.152 / 1.165. Tree: 1.206 / 1.219.**
   - The integer reference is within 0.0006 bits/byte of PyTorch.
   - The tree's routing stays balanced (leaf entropy 2.98–2.99 of 3 bits).
 - **Pico 2, two cores, bit-exact on all four builds:**
@@ -495,33 +507,51 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   | Tree, flash | 8.47 ms, 118 tok/s | 10.41 ms, 96 tok/s | 82 KB |
   | Dense, SRAM | 6.77 ms, 148 tok/s | 8.56 ms, 117 tok/s | 0 |
   | Dense, flash | 20.81 ms, 48 tok/s | 22.82 ms, 44 tok/s | 223 KB |
-  | Atome's engine, SRAM, window 24 | 1,414 ms, 0.71 tok/s | – | 0 |
+  | Atome's own engine, SRAM, window 24 (recomputes the context for every token) | 1,414 ms, 0.71 tok/s | – | 0 |
 
 - **Reading:**
-  - Idea B holds on a language model: 2.8x fewer weights read per token, 2.1x faster from SRAM and 2.5x from flash, for 0.054 bits/byte.
-  - Most of the gain over Atome's engine comes from the design for integer inference (a KV cache instead of recomputing the window, ternary × int8 lookup-table kernels, two cores), not from the tree.
+  - Idea B holds on a language model: 2.8x fewer weights read per token, 2.1x faster from SRAM and 2.5x from flash over positions 0–23 (1.7x and 2.2x over the full window), for 0.054 bits/byte.
+  - Twin caveats: the tree trains with extra losses and a soft phase (about 25% more training time), its tree settings came from MNIST untuned, and each twin's checkpoint was picked on the test text. It is one seed on one board.
+  - **That claim rests on the twins, not on Atome:** same runtime, data, budget and test text.
+- **The Atome comparison is not controlled** (full list in [lm.md](lm.md), "Fairness of the Atome comparison"):
+  - **Quality.** The measurement is identical: Atome's own loss code gives the same numbers.
+    - The training data differ. Atome's corpus is TinyStories train + valid (~1.7 GB, release not stated). It reports 1.52 bits/byte on its own split, 0.19 better than on ours. If all of that is domain shift, the held-out lead drops from 0.56 / 0.50 to about 0.36 / 0.30 bits/byte.
+    - Atome shows no sign of having seen our test text.
+    - Atome's float activations favour it.
+  - **Speed.** The 440x compares engines, not models.
+    - ~15x comes from Atome's engine recomputing the whole context for every token (no cache).
+    - ~8.6x is our runtime and model against its portable float engine at one position.
+    - 2.2x is the tree, and 1.6x the second core.
+    - Atome's engine with a cache would run at about 10 tok/s (an estimate; we decided not to build it), so the gap against it would be about 30x.
+    - Our tok/s excludes the prompt, which Atome's engine reprocesses inside every call. Counting it makes 440x about 300x.
+    - On the board, Atome only fits a 24-byte window (1.957 bits/byte there).
   - Details: [lm.md](lm.md).
 
 ## Gate 1
 
-**Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images), mafc is faster than CMSIS-NN in every like-for-like setup:
-- **4.08x on one core** (3.56 ms vs 14.52 ms, both from SRAM; 3.75x before F18);
-- 7.28x with both cores against CMSIS-NN's one (1.99 ms, F19);
-- 5.22x for a one-core flash build with the linear layers in SRAM, against CMSIS-NN from flash (18.70 ms).
+**Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images):
+- **Like for like: 4.08x on one core** (3.56 ms vs 14.52 ms, both from SRAM; 3.75x before F18).
+  - That build uses about 1.7x CMSIS-NN's flash (161 vs 94 KB) and about 1.3x its SRAM.
+  - With less flash than CMSIS-NN (the all-data build, 49.5 KB), it is 2.78x.
+- **Not like for like:**
+  - 7.28x with both cores against CMSIS-NN's one (1.99 ms, F19). Against a perfectly parallel two-core CMSIS-NN it would be at least 3.6x.
+  - 5.22x for a one-core flash build that keeps the linear layers as code in SRAM, against CMSIS-NN entirely in flash (18.70 ms). Against CMSIS-NN from SRAM it is 4.05x.
 
 Scope (F5, F17):
 - The MNIST margin is inflated by CMSIS-NN's weak kernels for one-input-channel and depthwise convs.
 - On a wide conv, the general win from compiling ternary weights into code is 1.2x (33% zeros) to 9x (90% zeros), and it loses at 0% zeros.
 - For int4 and int8 layers mafc is only level with CMSIS-NN (F18, F24). On an all-int8 version of the model it is still 3.90x faster on one core (6.86x on two), all of it from the conv stack (F24).
+- CMSIS-NN ran with int8 weights only. Its 4-bit (s4) kernels were not tried for fc1–fc3 (F11).
+- CMSIS-NN's kernels are the ones its wrappers select. Alternatives (`arm_depthwise_conv_s8_opt`, conv1 as a depthwise conv) were not timed.
 - Energy (step 2b) is not measured yet.
 
 ## Open questions and next experiments
 
 | Question | How to test | Status |
 |---|---|---|
-| Energy per inference (mJ) for each build | USB meter, idle vs busy (step 2b). Tooling ready: firmware command `L`, `harness/energy.py`, `measure.sh energy` | Cable here (13 Nov); the USB meter is too coarse for the Pico 2 (reads 0–4 mA). Needs a finer instrument |
+| Energy per inference (mJ) for each build | A finer meter (INA226 or PPK2), idle vs busy (step 2b). Tooling ready: firmware command `L`, `harness/energy.py`, `measure.sh energy` | Cable here (13 Nov); the USB meter is too coarse for the Pico 2 (reads 0–4 mA). Needs a finer instrument |
 | Bytes actually read from flash per inference | F22: measured with the XIP counters for every flash build (`flash_read_kb`): hybrid 1.2 KB, CMSIS-NN 45.5 KB | Done |
-| Idea B: tree over neurons (fast feedforward) | F25: depth-3 tree in place of fc1 + fc2: 6.6x fewer weights read, 3.8–6.2x faster for those layers, −0.30 points (99.15%); keep. Needs load balancing in training. Next: the tiny story model | Done for MNIST |
+| Idea B: tree over neurons (fast feedforward) | F25: depth-3 tree in place of fc1 + fc2: 6.6x fewer weights read, 3.4–6.2x faster for those layers, −0.30 points (99.15%); keep. Needs load balancing in training. Next: the tiny story model | Done for MNIST |
 | Idea C: DMA streaming of weights | F21: the stream FIFO with double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. F23: in the compiler (`--stream`), the 30 KB fc1 runs 29% faster on one core and 58% faster than two cores sharing the cache | Done |
 | How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |
@@ -533,7 +563,14 @@ Scope (F5, F17):
 
 ## Caveats
 
-- **Scope:** one board, one model family, a tiny task (MNIST, 16×16 input). Absolute numbers won't transfer; ratios and mechanisms are what matter.
+- **Scope:** one board (one Pico 2) and two tasks: MNIST (16×16 input, a tiny task) and a tiny story model (Phase 3). Absolute numbers won't transfer; ratios and mechanisms are what matter.
+- **One training run per model** (one seed). Differences of a few test images (MNIST), or a few thousandths of a bit per byte (story model), are within what another seed could change.
+- **Selection on the test set:** MNIST has no validation split here.
+  - Reported accuracies are final-epoch numbers. Where a "best" epoch is given, it was picked on the test set and is optimistic.
+  - The story model's checkpoints were picked on the first 2 MB of its test file. lm.md also gives numbers on a held-out slice.
+- **Run-to-run timing spread:** ≤0.2% from SRAM, up to 1.2% from flash.
+- **Energy is not measured** for any build. Every claim here is about speed, size or accuracy, not efficiency.
+- **Baselines:** CMSIS-NN ran int8-only (no s4), with the kernels its wrappers select. Atome ran with its own portable engine. We re-engineered neither.
 - **Measurement scope:** cycles cover `ref_infer()` on core 0 only. USB transfer time and core 1's idle time are excluded.
 - **Profiling overhead:** profiling builds add about 3% (one counter read per stage, per channel). Headline numbers come from builds without it, and stage tables from builds with it.
 - **Flash state:** flash-build timings depend on the cache, and the first image after a reset is slowest. Means over 10k images absorb this; the max does not.
