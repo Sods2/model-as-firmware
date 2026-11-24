@@ -1,3 +1,13 @@
+Changes to BitNetMCU (https://github.com/cpldcpu/BitNetMCU), made against upstream
+commit 0715bfc4ed9f2578496e17b4b0e13f2297e3cc0f.
+
+SPDX-License-Identifier: GPL-3.0-only
+
+This patch modifies BitNetMCU, which is licensed under the GNU General Public
+License v3.0, so this file is distributed under the GPL-3.0. Everything else in
+this repository is Apache-2.0 (see LICENSE and NOTICE). Apply it with
+`git apply` (this header is ignored); see train/README.md.
+
 diff --git a/BitNetMCU.py b/BitNetMCU.py
 index 03d1304..545a4fc 100644
 --- a/BitNetMCU.py

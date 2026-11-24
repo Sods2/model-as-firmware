@@ -1,0 +1,10 @@
+# Python packages for the compiler, harness and training scripts (Python 3.12).
+# Versions are the ones the results were measured with.
+# For a CUDA build of torch, install torch/torchvision first from
+# https://download.pytorch.org/whl/cu128 (see train/README.md).
+# Training also needs BitNetMCU's own requirements (cloned into train/BitNetMCU).
+numpy==2.5.4
+torch==2.11.0
+torchvision==0.26.0
+pyserial==3.5
+PyYAML==6.0.3

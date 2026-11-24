@@ -127,7 +127,7 @@ Done since this guide was first written: both cores, dual 16-bit multiplies, ide
 - **Energy per inference:** needs a finer current meter than the USB one on hand.
 - **A model bigger than the chip's fast memory,** where reading from flash sets the speed.
 
-Your own ideas and questions are tracked in [IDEAS.md](IDEAS.md).
+Further ideas and questions, with their tests and outcomes, are in [IDEAS.md](IDEAS.md).
 
 ## 11. Glossary
 

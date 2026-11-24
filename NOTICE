@@ -1,0 +1,39 @@
+Model as Firmware
+Copyright 2026 Sods2
+
+Licensed under the Apache License, Version 2.0 (see LICENSE). This covers the
+code, the generated firmware sources, the trained model weights, the results
+and the documentation in this repository, except for the files listed below.
+
+Third-party material included in this repository
+------------------------------------------------
+
+firmware/baselines/atome/upstream/
+  Atome LM inference engine, vendored unmodified.
+  Copyright 2026 Atome LM contributors. Apache License 2.0; its own LICENSE
+  and NOTICE are kept in that folder. The Atome trained weights are NOT
+  included; their licence is unclear (see notes/lm.md).
+
+firmware/rp2350/hello/pico_sdk_import.cmake
+  Copied from the Raspberry Pi Pico SDK.
+  Copyright 2020 Raspberry Pi (Trading) Ltd. BSD 3-Clause; the licence text is
+  kept in the file header.
+
+train/bitnetmcu.patch
+  Changes to BitNetMCU (https://github.com/cpldcpu/BitNetMCU), made against
+  upstream commit 0715bfc. Because it modifies BitNetMCU, which is licensed
+  under the GNU General Public License v3.0, this one file is distributed
+  under the GPL-3.0, not under Apache-2.0. The rest of this repository
+  contains no BitNetMCU code; it only reads the model headers that
+  BitNetMCU's export writes.
+
+Third-party material NOT included (fetched by the user)
+-------------------------------------------------------
+
+- BitNetMCU (GPL-3.0): cloned into train/BitNetMCU/ for training.
+- Arm CMSIS-NN (Apache-2.0): cloned into firmware/baselines/cmsis_nn/third_party/.
+- Raspberry Pi Pico SDK (BSD-3-Clause).
+- MNIST dataset (LeCun, Cortes and Burges), downloaded by torchvision.
+- TinyStories dataset (Eldan and Li, 2023; Hugging Face
+  roneneldan/TinyStories). The story-model weights in this repository were
+  trained on it; see its dataset card for its licence.

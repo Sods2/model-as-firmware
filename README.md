@@ -134,3 +134,7 @@ Options and details are in [harness/README.md](harness/README.md#watching-a-run-
 1. Energy per inference with a finer current meter (an INA226 breakout), which closes Gate 0.
 2. Optionally, a model larger than SRAM on the Pico 2, where flash traffic sets the speed (ideas C and G on the story model's flash builds).
 3. Phase 4 (bare-metal Pi 4) if you decide to go on; it needs the Pi 4's RAM size, a microSD card and a power supply.
+
+## Licence
+
+Apache-2.0 ([LICENSE](LICENSE)), covering the code, the generated firmware, the trained weights, the results and the docs. The exception is [train/bitnetmcu.patch](train/bitnetmcu.patch), a set of changes to the GPL-3.0 BitNetMCU, which is GPL-3.0. Third-party code and data are listed in [NOTICE](NOTICE).

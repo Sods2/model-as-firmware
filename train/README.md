@@ -37,7 +37,7 @@ Model: 8-bit depthwise CNN (80 ch) → **fc1 320→96 ternary** → fc2 96→64 
 - `models.py` `FFFLayer`, `CNNMNIST_FFF` (idea B): a fast feedforward tree layer with soft routing, a hardening loss, a load-balancing loss and straight-through hard routing from `fff_hard_epoch`. Evaluation (no grad) always routes hard.
 - `training.py`: adds `model.aux_loss()` to the loss and calls `model.set_epoch(epoch)` when the model has them; prints `model.fff_info()` (entropy, balance, leaf use).
 
-The clone isn't tracked in this repo. The patches are saved in `bitnetmcu.patch`, made against upstream commit `0715bfc`. To apply them after a fresh clone:
+The clone isn't tracked in this repo. The patches are saved in `bitnetmcu.patch`, made against upstream commit `0715bfc`. Because it changes GPL-3.0 code, that one file is GPL-3.0; the rest of the repo is Apache-2.0 (see [NOTICE](../NOTICE)). To apply them after a fresh clone:
 ```
 git -C BitNetMCU checkout 0715bfc4ed9f2578496e17b4b0e13f2297e3cc0f
 git -C BitNetMCU apply ../bitnetmcu.patch
