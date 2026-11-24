@@ -18,6 +18,7 @@
 >   - Story model: the feedforward stage about 5–6x, the whole token 1.7–2.5x (F26).
 > - **"Phase 3 has largely been done already" (Atome) was too strong.** Atome has no feedforward layer for idea B, and its engine is not a strong baseline. Phase 3 trained its own model. The controlled language-model result is the dense/tree twin comparison; there is no strong external language-model baseline (notes/lm.md, "Fairness of the Atome comparison").
 > - **Phase 3's target ("beat Atome's ~1 tok/s") was met** with a different model and a different engine, so it is not a like-for-like result.
+> - **The verdict below, checked claim by claim at Gate 3** (notes/FINDINGS.md, "Gate 3"): feasible as a proof of concept for speed on models that fit the Pico 2's SRAM. Weights as code are shown on MNIST only. The story model keeps its weights as data by design; all of them as code would need about 3 MB, and code for its small matrices was not tried.
 
 ## Verdict
 
