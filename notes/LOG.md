@@ -266,3 +266,8 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
 - **Test launcher** (`harness/launcher.py`, `ui/launcher.html`): one page to choose MNIST or the story model, then golden, PC build or board, then keep the board's build or flash any existing one.
   - It starts the matching live view on port 8766, and both live pages link back.
   - Checked: MNIST on the board after flashing `mafc2_s-tern80-ram-code-i4code-prof` (2.00 ms, 100% golden match); the story model after flashing `lm_tree-ram-dual`; the MNIST PC build; the story golden model; and keeping the board's build.
+- **Gate 3 verdict written** (FINDINGS, "Gate 3"). Feasible as a proof of concept for speed on models that fit the Pico 2's SRAM. A fact-check pass against the sources tightened several rows the same day. Energy is not measured, weights as code are shown on MNIST only, and there is no strong language-model baseline.
+  - Gates: 0 met except energy; 1 met with a stated scope; 2 partly (idea D and PIO not tried); 3 met, not like for like.
+  - Idea B on the story model meets its 3x target for the tree layers (7.8x fewer FFN weights read, FFN 5.4x faster). Over the whole token it reads 2.7x fewer flash bytes (82 vs 223 KB).
+  - New number: 40% of the story model's 0.89M ternary weights are zero (dense 39.8%, tree 40.8%, from `train/runs/lm_*.npz`). All of its ~530K non-zero weights as code would take about 3 MB, six times the SRAM. The story model keeps its weights as data by design; code for its small matrices was not tried.
+  - Phase 4 is the user's decision. Recommended first: energy with an INA226, then optionally a model larger than SRAM on the Pico 2 (ideas C and G).

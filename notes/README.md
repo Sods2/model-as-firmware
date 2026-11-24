@@ -6,7 +6,7 @@ Working notes kept for future reference: what was looked into, what was found, a
 |---|---|
 | [FINDINGS.md](FINDINGS.md) | **Start here for analysis:** all conclusions so far (F1–F26) with evidence, headline numbers, open questions, caveats |
 | [EXPLAINER.md](EXPLAINER.md) | **New to the project?** Plain-language guide from zero: models, ternary, the hardware, what each piece does, results so far, glossary. Keep it updated |
-| [IDEAS.md](IDEAS.md) | Ideas and questions to test (U1–U4 so far: cache placement, cheaper weight unpacking, compute/load core split, weights as code), each with an assessment and a test plan |
+| [IDEAS.md](IDEAS.md) | Ideas and questions to test (U1–U5: cache placement, cheaper weight unpacking, compute/load core split, weights as code, bitnet.cpp for the Pi phase), each with an assessment, a test and its outcome |
 | [LOG.md](LOG.md) | Dated lab log: what was done each session, with key numbers |
 | [lm.md](lm.md) | Phase 3: the tiny story models (Atome baseline, our MafLM twins, integer reference, firmware, results) and the fairness of the Atome comparison |
 | [bitnetmcu-integer-inference.md](bitnetmcu-integer-inference.md) | How BitNetMCU's integer inference works (packing formats, requantization), how our C reference and golden model relate to it, licence |

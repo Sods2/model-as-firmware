@@ -1,6 +1,6 @@
 # Findings so far
 
-*Consolidated 11 Nov 2026 and extended since (F1–F26: Phase 0, Phase 1 with ideas A–C, and the Phase 3 story model). Fairness review 14 Nov 2026: every comparison states its conditions, and the caveats that apply everywhere are in "Caveats" at the end. One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
+*Consolidated 11 Nov 2026 and extended since (F1–F27: Phase 0, Phase 1 with ideas A–C, and the Phase 3 story model). The Gate 3 verdict, closing the Pico phases, is in "Gate 3". Fairness review 14 Nov 2026: every comparison states its conditions, and the caveats that apply everywhere are in "Caveats" at the end. One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
 
 Setup for all numbers:
 - **Board and clock:** Raspberry Pi Pico 2 (RP2350, Cortex-M33) at 150 MHz.
@@ -576,6 +576,77 @@ Scope (F5, F17):
 - CMSIS-NN's 4-bit (s4) kernel was tried for fc1 (F27). It is slower from SRAM, so the bar stands; from flash it is 7% faster. fc2/fc3 can't use s4 without changing the model.
 - CMSIS-NN's kernels are the ones its wrappers select. Alternatives (`arm_depthwise_conv_s8_opt`, conv1 as a depthwise conv) were not timed.
 - Energy (step 2b) is not measured yet.
+
+## Gate 3: verdict at the end of the Pico phases
+
+*Written 14 Nov 2026 and fact-checked against the sources the same day.* The roadmap (FEASIBILITY-STUDY.md, "Roadmap") says feasibility is answered by the end of Phase 3, on a $6 board, before any larger spend. This is that answer. Gates 0 and 2 were never written up on their own, so their status is included here.
+
+**Verdict: feasible as a proof of concept for speed, on models that fit the Pico 2's SRAM.** "Fit" is the only sense in which size was shown: the fastest MNIST builds use more memory than CMSIS-NN (Gate 1), and code costs about twice what the study estimated. Three further limits apply:
+- **Energy is not measured.** Energy is the other half of the "hardwired chip" argument, so nothing here supports an efficiency claim.
+- **Weights compiled into code are shown on MNIST only, and there only for the linear layers.** The story model runs on a specialised hand-written runtime that reads packed weights as data. That was a design choice from its v0. All of its weights as code would not fit in SRAM (about 3 MB). Code for only its small matrices was planned but never tried.
+- **There is no strong external baseline for the language model.** The controlled language-model result is the dense/tree twin comparison. Atome is an outside reference point only.
+
+### The gates
+
+| Gate | Criterion | Status | Evidence |
+|---|---|---|---|
+| 0 | Board output = PyTorch, read as bit-exact with the integer golden model (F1); baseline numbers logged (HANDOFF §6); energy, step 2b (GETTING-STARTED.md) | **Met except energy** | F1; `results/phase0.csv` |
+| 1 | Beats CMSIS-NN at equal accuracy (HANDOFF §6) | **Met, with a stated scope:** 4.08x like for like on one core | "Gate 1"; F17, F27 |
+| 2 | Two cores, DMA, PIO and ideas A–D, each against its keep-if threshold (roadmap; HANDOFF §7) | **Partly:** two cores, SIMD/DSP, DMA and ideas A, B and C are done. Idea D and PIO were not tried | Next table |
+| 3 | Tiny story model on the Pico, beating Atome's ~1 tok/s (roadmap) at the same model size (FEASIBILITY-STUDY.md, "What changes in the plan" #4) | **Met, not like for like** | F26; [lm.md](lm.md) |
+
+### Ideas against their keep-if thresholds (HANDOFF §7)
+
+| Idea | Keep if | Result | Verdict |
+|---|---|---|---|
+| A. Structure as code | The hybrid is at least as fast as the faster of all-code and all-data, with less flash | The hybrid is fastest from flash and ties all-code from SRAM. It uses less flash than all-code, but 3x all-data's (156 vs 52 KB) (F20) | **Kept** |
+| B. Tree over neurons | ≥3x fewer bytes and lower latency, <1 point of accuracy lost. The study puts the 3x on the tree layers and on latency too | **MNIST, tree layers:** 6.6x fewer weights, 3.4–6.2x faster, −0.30 points (F25).<br>**Story model, tree layers:** 7.8x fewer weights read; the FFN stage is 5.4x faster (check models, one core, SRAM; lm.md).<br>**Story model, whole token:** 2.7x fewer flash bytes (82 vs 223 KB), 2.1–2.5x faster (positions 0–23), +0.054 bits/byte (+4.7%) (F26) | **Kept.** The 3x is met for the tree layers on both models; over the whole token the story model reads 2.7x fewer bytes. "1 point" has no direct bits/byte equivalent |
+| C. DMA streaming | ≥20% lower latency | 31% on a 64 KB layer (F21).<br>In the compiler, fc1 is 29% faster; the whole model is 19% faster on one core, and 40% faster on two cores against two cores sharing the cache (F23) | **Kept for layers that live in flash.** It is not in the fastest MNIST builds, where code in SRAM wins, and the story model doesn't use it yet |
+| D. Early exit | ≥25% lower average latency, <1 point lost | Not tried | Open |
+| E. Lookup-table maths (MADDNESS) | Only if time allows | Not tried as specified (learned hashing, approximate). A related exact technique, lookup tables over activations (the T-MAC / bitnet.cpp style), is in the story model's runtime. With the runtime's other v1 changes (32-bit divisions, per-vector work), the matvecs fell from 3.1–4.3 to 1.2–1.7 cycles per weight, and a token got about 2x faster ([lm.md](lm.md), "Runtime v1") | Open as specified; the exact variant is in use |
+| F. Split layers over several boards | 3 boards ≥2x faster than 1 | Not tried | Open |
+| G. SRAM cache over flash | ≥50% hit rate, ≥1.5x faster | Not tried. It needs weights read from flash; the story model's flash builds qualify | Open |
+| H. Prompt batching | Faster time to first token | Not tried | Open |
+
+### The feasibility study's claims against the measurements
+
+| Claim (FEASIBILITY-STUDY.md, "Verdict") | Measured | Holds? |
+|---|---|---|
+| The firmware is the model: no OS, no runtime, no model file, weights compiled into instructions | **MNIST: yes for the linear layers.** The compiler emits C per layer, and the linear layers become instructions (F16). The conv weights stay as data by choice (F20).<br>**Story model: partly.** It has no OS and no model file (the weights are linked into the firmware). But it runs on a hand-written runtime (`lm_rt.c`) that reads packed weights as data, by design from v0. 40% of its 0.89M ternary weights are zero; the ~530K non-zero ones as code would take about 3 MB at 5.6–6 bytes each (F16, F17), about six times the SRAM. Per token that would mean reading roughly 3 MB (dense) or 1.1 MB (tree, its path only) of code, against 223 / 82 KB of packed weights. Code for the small matrices only was not tried | Partly |
+| Every compute unit on the chip is used | Both cores, SIMD/DSP and DMA are used. DMA appears only in `--stream` builds; the fastest MNIST builds don't need it, and the story model doesn't use it. PIO and the SIO interpolators are unused | Partly |
+| A solid gain over a standard embedded runtime on small models, not 70x | 4.08x over CMSIS-NN like for like.<br>The margin is inflated by CMSIS-NN's weak kernels for this model's shape (F5).<br>On a wide conv the gain is 1.2–9x depending on the share of zero weights, and it loses when none are zero (F17).<br>Level with CMSIS-NN on int4 and int8 layers (F18, F24) | Yes, with that scope |
+| The gain is limited to models whose generated code fits in on-chip SRAM | **Direct evidence:** fc1 as code run from flash costs 611k cycles against 51k from SRAM (F16), and all-code from flash is 1.8–3x slower (F20).<br>**Story model** (packed data, not code): from flash it is 2.6x (tree) and 3.1x (dense) slower than from SRAM on two cores, partly because flash builds keep the matvec rows on core 0. On one core the gap is 1.8x and 2.1x (check models; lm.md).<br>Its SRAM builds fill about 475–482 KiB of the 512 KiB of main SRAM: 216 KB of packed weights, a 33 KB embedding and a 144 KB KV cache. So about 0.9M ternary weights is the ceiling for SRAM builds of this design with a 256-byte window | Yes |
+| Weights as code cost 2–4 bytes per non-zero weight | 5.6–6 bytes (F16, F17) | No: about 2x too low |
+| Phase 3: beat Atome's ~1 tok/s at the same model size | 310 tok/s (tree, SRAM, two cores) against 0.71 tok/s for Atome's own engine (437x), at 0.92M against 944K weights. Even our slowest build (dense, flash) runs at 48 tok/s.<br>This compares engines, not models: about 15x of the gap is Atome's engine recomputing the context for every token. Counting our prompt time makes 437x about 300x. A cached Atome engine is estimated (not built) at about 10 tok/s, which would leave about a 30x gap. On the board Atome fits only a 24-byte window (1.957 bits/byte there) (F26) | Yes, not like for like |
+| The compiler carries over to other back ends (FPGA) | Only the RP2350 back end exists | Untested |
+
+### What the verdict does not cover
+
+- **Energy.** No build has been measured for energy.
+- **Sample size:** one board, one training run per model, and checkpoints selected on test data (see "Caveats").
+- **Task size:** MNIST is a tiny task, and the Gate 1 margin depends on the model's shape (F5, F17).
+- **Language-model baseline:** none is strong. The dense/tree twins are the controlled comparison.
+
+### Recommendation for Phase 4 (the decision is the user's)
+
+Nothing in the Pico phases rules out continuing. Three results call for caution:
+- code costs about twice the estimate;
+- weights as code did not reach the language model;
+- energy is unknown.
+
+Phase 4 asks a different question: models larger than fast memory, with storage as the slow tier. What we learned carries over only in part.
+
+- **What carries over:**
+  - When weights come from slow memory, bytes read per token set the speed (F2, F22, F26). From SRAM the story model is compute-bound, with attention dominating late in the window.
+  - Integer ternary kernels with lookup tables over activations.
+  - The tree, which reads fewer bytes.
+- **What doesn't carry over directly:**
+  - "Code fits in SRAM" becomes "fits in the cache": the Pi 4's Cortex-A72 cores share a 1 MB L2.
+  - The Pico results involved no DRAM, no OS and no NEON.
+- **Before any larger spend:**
+  1. **Measure energy with an INA226** (a few euros). This closes Gate 0 and fills the last metric in the table.
+  2. **Optionally, run a model larger than SRAM on the Pico 2.** Ideas C and G applied to the story model's flash builds would test the storage-tier mechanism on hardware already on hand.
+  3. **Confirm the Pi 4's RAM, a microSD card and a power supply** (HANDOFF §9).
 
 ## Open questions and next experiments
 

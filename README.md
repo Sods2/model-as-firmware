@@ -54,7 +54,7 @@ One inference: conv1 → dw1 → pool1 → dw2 → pool2 (run per channel, split
 
 ## Status
 
-*As of 14 Nov 2026.* Phases 0, 1 and 3 are done on the Pico 2. Energy is not measured yet (see the bullets below). Every timed build matches its golden model bit for bit. All numbers come from one board, one training run per model, and the sources named. Unequal conditions are stated next to each number.
+*As of 14 Nov 2026.* Phases 0, 1 and 3 are done on the Pico 2. **Gate 3 verdict** ([FINDINGS, "Gate 3"](notes/FINDINGS.md)): feasible as a proof of concept for speed on models that fit the Pico 2's SRAM; weights as code are shown on MNIST only, and there is no strong language-model baseline. Energy is not measured yet (see the bullets below). Every timed build matches its golden model bit for bit. All numbers come from one board, one training run per model, and the sources named. Unequal conditions are stated next to each number.
 
 **Phase 1 (MNIST, against CMSIS-NN): Gate 1 met, with a stated scope ([FINDINGS F17](notes/FINDINGS.md)).**
 - **Like for like (one core each, both from SRAM, 99.47% vs 99.44% accuracy):** the compiler's build runs in **3.56 ms against CMSIS-NN's 14.52 ms, 4.1x faster**.
@@ -131,6 +131,10 @@ Options and details are in [harness/README.md](harness/README.md#watching-a-run-
 
 ## Next steps
 
-1. Close Phase 3: a Gate 3 write-up and the PR to `main`.
-2. A model larger than SRAM on the Pico 2, where flash traffic sets the speed (ideas B, C and G together).
-3. Energy per inference, once a finer current meter is available.
+1. Energy per inference with a finer current meter (an INA226 breakout), which closes Gate 0.
+2. Optionally, a model larger than SRAM on the Pico 2, where flash traffic sets the speed (ideas C and G on the story model's flash builds).
+3. Phase 4 (bare-metal Pi 4) if you decide to go on; it needs the Pi 4's RAM size, a microSD card and a power supply.
+
+## Licence
+
+Apache-2.0 ([LICENSE](LICENSE)), covering the code, the generated firmware, the trained weights, the results and the docs. The exception is [train/bitnetmcu.patch](train/bitnetmcu.patch), a set of changes to the GPL-3.0 BitNetMCU, which is GPL-3.0. Third-party code and data are listed in [NOTICE](NOTICE).
