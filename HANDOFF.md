@@ -178,7 +178,7 @@ model-as-firmware/
 
 ## Key links
 
-- Claude Docs: [Feasibility study]((private link removed)) · [Shopping list]((private link removed))
+- Docs: [Feasibility study](FEASIBILITY-STUDY.md) · [Shopping list](SHOPPING-LIST.md)
 - Baselines: [BitNetMCU](https://github.com/cpldcpu/BitNetMCU) · [Atome LM](https://github.com/TilelliLab/atome-lm) · [CMSIS-NN](https://github.com/ARM-software/CMSIS-NN) · [ESP32-S3 LLM Cluster](https://github.com/Low-Zi-Hong/ESP32s3-LLM-Cluster) · [InferPi](https://github.com/siddharthjthapa/InferPi)
 - Techniques: [UltraFastBERT / FFF](https://arxiv.org/abs/2311.10770) · [CALM early exit](https://proceedings.neurips.cc/paper_files/paper/2022/hash/6fac9e316a4ae75ea244ddcef1982c71-Abstract.html) · [Sherry N:M ternary](https://arxiv.org/pdf/2601.07892) · [WiCi InferSSD](https://wici.ai/article/running-800b-models-with-inferssd)
 - FPGA later: [hls4ml](https://fastmachinelearning.org/hls4ml/) · [FINN](https://xilinx.github.io/finn)
