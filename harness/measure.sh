@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build, flash and measure any set of builds on the Pico 2 (Git Bash, from the repo root).
 #
-#   harness/measure.sh <profile|final|energy> <csv> <build:model:mem[:ternary[:int4[:conv[:stream[:int8]]]]]> ...
+#   harness/measure.sh <profile|final|energy> <csv> <build:model:mem[:ternary[:int4[:conv[:stream[:int8[:fuse]]]]]]> ...
 #     build  ref_c | cmsis_nn | cmsis_nn_s4 (fc1 as CMSIS-NN s4) | mafc | mafc2 (dual-core) | mafc_s (SMLAD) | mafc2_s (dual-core + SMLAD)
 #     model  tern80 | tern80z70 | tern80z90 | int8_80 (all linear layers int8)
 #     mem    flash | ram          (ram = copy_to_ram: code and weights in SRAM)
@@ -10,6 +10,8 @@
 #     conv     data (default) | code                     (mafc SIMD builds: conv weights, compile.py --conv)
 #     stream   nostream (default) | stream               (mafc: dense layers streamed from flash, compile.py --stream)
 #     int8     plain (default) | code | dense            (mafc builds: format of int8 layers, compile.py --int8)
+#     fuse     nofuse (default) | fpool | fpoolrp        (mafc SIMD builds: convs fused with the max pool after them, compile.py --fuse-pool;
+#                                                       rp adds --row-pairs: conv1 computes two output rows per step)
 #
 #   profile: 200 images, stage counters on;  final: 10k images, counters off.
 #   energy: builds as final, then harness/energy.py (interactive: USB meter readings) instead of run.py;
@@ -30,8 +32,8 @@ case $MODE in profile|final|energy) ;; *) echo "unknown mode $MODE"; exit 1 ;; e
 . harness/flash.sh   # flash(): SWD via the Debug Probe, picotool fallback (FLASH=auto|swd|usb)
 
 for spec in "$@"; do
-  IFS=: read -r build model mem tern i4 cv st i8 <<< "$spec"
-  tern=${tern:-base3}; i4=${i4:-packed}; cv=${cv:-data}; st=${st:-nostream}; i8=${i8:-plain}
+  IFS=: read -r build model mem tern i4 cv st i8 fu <<< "$spec"
+  tern=${tern:-base3}; i4=${i4:-packed}; cv=${cv:-data}; st=${st:-nostream}; i8=${i8:-plain}; fu=${fu:-nofuse}
   extra=
   case $build in
     ref_c)    src=firmware/baselines/ref_c;    golden=ref ;;
@@ -50,9 +52,12 @@ for spec in "$@"; do
   [ "$cv" != data ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4-cv$cv$SUFFIX
   [ "$st" = stream ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4-cv$cv-stream$SUFFIX
   [ "$i8" != plain ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4-cv$cv-$st-i8$i8$SUFFIX
+  [ "$fu" != nofuse ] && dir=$src/build-$build-$model-$mem-$tern-i4$i4-cv$cv-$st-i8$i8-$fu$SUFFIX
+  fuse_flag=OFF; rp_flag=OFF
+  case $fu in nofuse) ;; fpool) fuse_flag=ON ;; fpoolrp) fuse_flag=ON; rp_flag=ON ;; *) echo "unknown fuse $fu"; exit 1 ;; esac
   stream_flag=OFF; [ "$st" = stream ] && stream_flag=ON
   ram=OFF; [ "$mem" = ram ] && ram=ON
-  cmake -S $src -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODEL=$model -DRUN_FROM_RAM=$ram -DPROFILE_STAGES=$PROF -DTERNARY=$tern -DINT4=$i4 -DCONV=$cv -DSTREAM=$stream_flag -DINT8=$i8 ${extra:-} >/dev/null
+  cmake -S $src -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMODEL=$model -DRUN_FROM_RAM=$ram -DPROFILE_STAGES=$PROF -DTERNARY=$tern -DINT4=$i4 -DCONV=$cv -DSTREAM=$stream_flag -DINT8=$i8 -DFUSE_POOL=$fuse_flag -DROW_PAIRS=$rp_flag ${extra:-} >/dev/null
   ninja -C "$dir" >/dev/null
   flash "$dir/$target.uf2"
   if [ "$MODE" = energy ]; then

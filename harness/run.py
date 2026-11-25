@@ -238,7 +238,7 @@ def main():
         total = sum(stages.values())
         print('  stages (image 0):  ' + ', '.join(f'{k} {v} ({v / total * 100:.0f}%)' for k, v in stages.items()))
         # one file per stage set, so columns always line up (dual-core builds add a 'join' stage)
-        suffix = ('_fff' if 'fff' in stages else '') + ('_stages_dual.csv' if 'join' in stages else '_stages.csv')
+        suffix = ('_fff' if 'fff' in stages else '') + ('_fpool' if any('+' in k for k in stages) else '') + ('_stages_dual.csv' if 'join' in stages else '_stages.csv')
         sp = Path(args.csv).with_name(Path(args.csv).stem + suffix)
         new_s = not sp.exists()
         if not new_s:

@@ -83,14 +83,14 @@ Digit recognition (MNIST), one image, time per answer. All builds give bit-exact
 | CMSIS-NN (ARM's library), 99.44% | 1 | 18.70 ms | **14.52 ms**, the bar |
 | Our plain-C reference, 99.47% | 1 | 10.21 ms | 9.52 ms |
 | Our compiler v0 | 1 | 8.66 ms | 8.18 ms |
-| Our compiler, best build, 99.47% | **1** | 3.58 ms | **3.56 ms, 4.1× the bar (the fair comparison)** |
-| Our compiler, best build | 2 | 2.27 ms | 1.99 ms (7.3× the bar, but the bar uses one core) |
+| Our compiler, best build, 99.47% | **1** | 3.14 ms | **3.08 ms, 4.7× the bar (the fair comparison)** |
+| Our compiler, best build | 2 | 1.99 ms | 1.67 ms (8.7× the bar, but the bar uses one core) |
 
 "From SRAM" means the whole program is copied into fast memory at start-up, so there are no flash waits.
 
 Things to keep in mind:
-- **The fair number is one core against one core: 4.1×.** CMSIS-NN only uses one core.
-- **Our fast builds use more memory:** 156–161 KB of flash and 129–164 KB of SRAM, against CMSIS-NN's 94 KB and 33–127 KB. Turning weights into instructions costs space.
+- **The fair number is one core against one core: 4.7×.** CMSIS-NN only uses one core.
+- **Our fast builds use more memory:** 133–161 KB of flash and 128–160 KB of SRAM, against CMSIS-NN's 94 KB and 33–127 KB. Turning weights into instructions costs space.
 - **Our "from flash" builds still keep the linear layers in SRAM**, while CMSIS-NN's flash build reads everything from flash.
 - **On one wide layer, the shape CMSIS-NN is built for,** our approach only wins when enough weights are zero: it breaks even at about 14% zeros and loses when no weights are zero (FINDINGS F17).
 

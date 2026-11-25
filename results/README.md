@@ -17,7 +17,7 @@
 - "vs CMSIS-NN (same memory)†" means against CMSIS-NN built for the same place (flash or SRAM). It is not always the same conditions:
   - Two-core rows are compared with CMSIS-NN on its one core.
   - Rows marked "linear in SRAM" / "fc1 in SRAM" keep those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM).
-- The like-for-like figure is one core against one core, both from SRAM: **4.08x** (3.56 vs 14.52 ms).
+- The like-for-like figure is one core against one core, both from SRAM: **4.72x** (3.08 vs 14.52 ms, the best-of build of 25 Nov; 4.08x before it).
 - The CMSIS-NN ratios here use its int8 build. With its 4-bit kernel for fc1 (`cmsis_nn_s4fc1*` rows in `phase0.csv`, FINDINGS F27), CMSIS-NN is 7% faster from flash (17.41 ms) and 3% slower from SRAM. So the flash ratios here are about 7% too high, and the SRAM ratios stand.
 - Our fastest builds use more flash than CMSIS-NN (156–161 KB vs 94 KB).
 - Run-to-run spread on repeated builds: ≤0.2% from SRAM, up to 1.2% from flash.
@@ -258,6 +258,24 @@ One 3×3 conv, 10×10×32 → 8×8×32, ternary weights. CMSIS-NN `arm_convolve_
 - The rows labelled "first run" used 3 cases and different random weights.
 
 \* **RAM method changed on 11 Nov 2026 (these rows on).** `ram_kb` is now the sum of every section linked at a main-SRAM address (`arm-none-eabi-size -A`), excluding heap and stacks. Before, it was data + bss (+ text for copy_to_ram builds) from Berkeley `size`. That missed code copied to SRAM in flash builds: the first fc1-as-code flash build showed 9.7 KB instead of 97.5 KB. Compared with the new method, the old one overstated copy_to_ram builds by about 5–6 KB (it counted flash-only boot sections) and understated flash builds by about 2 KB. For example, mafc_v1_dual_simd (SRAM) was 62.9 KB the old way and is 56.3 KB the new way. Older rows were not rewritten.
+
+### Best-of build (`notes` = `best-of: ...`, 25 Nov 2026)
+
+Pools fused into the convs (`--fuse-pool`), conv1 two output rows per step (`--row-pairs`), fc2/fc3 dense or code (FINDINGS F28). Build names end in `_fpool_rp`; `measure.sh` takes them as a 9th field, `fpoolrp` (`mafc2_s:tern80:ram:code:dense:data:nostream:plain:fpoolrp`). Profiles of the steps are in `profile.csv` and `profile_fpool_stages_dual.csv`.
+
+| Build | Before | Best-of | vs CMSIS-NN (same memory)† | Flash | RAM* |
+|---|---|---|---|---|---|
+| mafc_v0_simd_code_i4dense_fpool_rp (SRAM) | 3.56 ms | **3.08 ms** | **4.72x** | 137.0 KB | 139.8 KB |
+| mafc_v1_dual_simd_code_i4dense_fpool_rp (SRAM) | 1.99 ms | **1.67 ms** | 8.69x | 133.3 KB | 136.8 KB |
+| mafc_v1_dual_simd_code_i4code_fpool_rp (SRAM) | 1.99 ms | 1.666 ms | 8.72x | 157.0 KB | 160.2 KB |
+| mafc_v0_simd_code_i4code_fpool_rp (flash, linear in SRAM) | 3.59 ms | 3.14 ms | 5.96x | 161.5 KB | 132.8 KB |
+| mafc_v1_dual_simd_code_i4code_fpool_rp (flash, linear in SRAM) | 2.27 ms | 1.99 ms | 9.39x | 157.2 KB | 127.7 KB |
+| mafc_v1_dual_simd_code_i4dense_fpool_rp (flash, fc2/fc3 dense in flash) | | 2.60 ms | 7.19x | 133.4 KB | 96.2 KB |
+| mafc_v0_simd_code_i4dense_fpool_rp (flash, fc2/fc3 dense in flash) | | 3.68 ms | 5.08x | 137.2 KB | 101.0 KB |
+| fff80: mafc_v0_simd_code_i4dense_fpool_rp (SRAM, 99.15%) | 3.23 ms | 2.77 ms | 5.25x | 117.2 KB | 120.5 KB |
+| fff80: mafc_v1_dual_simd_code_i4dense_fpool_rp (SRAM, 99.15%) | 1.86 ms | 1.53 ms | 9.49x | 118.8 KB | 122.8 KB |
+
+All bit-exact on all 10,000 images, on the PC and on the board.
 
 ## Phase 3 summary (13–14 Nov 2026)
 

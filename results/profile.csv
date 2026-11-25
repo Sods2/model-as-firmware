@@ -84,3 +84,8 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-14 10:57,cmsis_nn_s4fc1_ram_prof,tern80,pico,200,100.0,100.0,100.0,14.92,2238014,2237967,2238954,150,80.82,109.77,0.0,,fc1 s4 vs s8 stage profile (14 Nov)
 2026-11-14 10:58,cmsis_nn_prof,tern80,pico,200,100.0,100.0,100.0,18.762,2814257,2807034,2846537,150,94.26,37.79,45.78,,fc1 s4 vs s8 stage profile (14 Nov)
 2026-11-14 10:58,cmsis_nn_ram_prof,tern80,pico,200,100.0,100.0,100.0,14.537,2180614,2180569,2182059,150,94.15,123.1,0.0,,fc1 s4 vs s8 stage profile (14 Nov)
+2026-11-25 12:19,mafc_v1_dual_simd_code_i4code_fpool_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.738,260752,260551,261317,150,157.03,160.23,0.0,,best-of: conv+pool fused
+2026-11-25 12:20,mafc_v1_dual_simd_code_i4dense_fpool_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.74,260941,260789,261440,150,133.28,136.79,0.0,,best-of: conv+pool fused
+2026-11-25 12:23,mafc_v1_dual_simd_code_i4dense_fpool_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.748,262158,261555,264131,150,133.17,136.68,0.0,,best-of: fused + LDRD
+2026-11-25 12:25,mafc_v1_dual_simd_code_i4dense_fpool_rp_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.679,251858,251704,252515,150,133.43,136.94,0.0,,best-of: fused + conv1 row pairs
+2026-11-25 12:26,mafc_v1_dual_simd_code_i4dense_fpool_rp_ram_prof,tern80,pico,200,100.0,100.0,100.0,1.679,251854,251704,252560,150,133.43,136.94,0.0,,"best-of: fused + row pairs (conv1, dw1+pool1)"

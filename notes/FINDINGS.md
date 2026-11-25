@@ -1,6 +1,6 @@
 # Findings so far
 
-*Consolidated 11 Nov 2026 and extended since (F1–F27: Phase 0, Phase 1 with ideas A–C, and the Phase 3 story model). The Gate 3 verdict, closing the Pico phases, is in "Gate 3". Fairness review 14 Nov 2026: every comparison states its conditions, and the caveats that apply everywhere are in "Caveats" at the end. One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
+*Consolidated 11 Nov 2026 and extended since (F1–F28: Phase 0, Phase 1 with ideas A–C, the Phase 3 story model, and the best-of build). The Gate 3 verdict, closing the Pico phases, is in "Gate 3". Fairness review 14 Nov 2026: every comparison states its conditions, and the caveats that apply everywhere are in "Caveats" at the end. One place to read and analyse the conclusions. Each finding gives its evidence, where the raw data lives, and what it means for the project. The narrative is in [LOG.md](LOG.md), and the details are in the topic notes linked below.*
 
 Setup for all numbers:
 - **Board and clock:** Raspberry Pi Pico 2 (RP2350, Cortex-M33) at 150 MHz.
@@ -35,7 +35,11 @@ Setup for all numbers:
 | mafc v1 + SMLAD + all linear layers as code (two cores) | flash, linear in SRAM | 2.35 ms | 0.35M | 7.95x | 156.5 KB | 129.2 KB* | `results/phase1.csv` |
 | mafc v1 + SMLAD + all linear layers as code (two cores) | SRAM | 2.15 ms | 0.32M | 6.77x | 156.3 KB | 161.1 KB* | `results/phase1.csv` |
 | mafc v1 + SMLAD + linear as code + shared kernel (two cores) | flash, linear in SRAM | 2.27 ms | 0.34M | 8.23x | 156.5 KB | 129.2 KB* | `results/phase1.csv` |
-| **mafc v1 + SMLAD + linear as code + shared kernel (two cores)** | **SRAM** | **1.99 ms** | **0.30M** | **7.28x** | 156.4 KB | 161.1 KB* | `results/phase1.csv` |
+| mafc v1 + SMLAD + linear as code + shared kernel (two cores) | SRAM | 1.99 ms | 0.30M | 7.28x | 156.4 KB | 161.1 KB* | `results/phase1.csv` |
+| best-of (F28): + pools fused, conv1 row pairs, fc2/fc3 dense (one core) | flash, linear as code in SRAM (fc2/fc3 code) | 3.14 ms | 0.47M | 5.96x | 161.5 KB | 132.8 KB* | `results/phase1.csv` |
+| **best-of (F28), one core** | **SRAM** | **3.08 ms** | **0.46M** | **4.72x** | 137.0 KB | 139.8 KB* | `results/phase1.csv` |
+| best-of (F28), two cores | flash, linear as code in SRAM (fc2/fc3 code) | 1.99 ms | 0.30M | 9.39x | 157.2 KB | 127.7 KB* | `results/phase1.csv` |
+| **best-of (F28), two cores** | **SRAM** | **1.67 ms** | **0.25M** | **8.69x** | 133.3 KB | 136.8 KB* | `results/phase1.csv` |
 
 † Same place, not always the same conditions. Two-core rows are compared against one-core CMSIS-NN. In the "linear in SRAM" / "fc1 in SRAM" rows, mafc keeps those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM). Against CMSIS-NN from SRAM (14.52 ms), those rows are 3.5x (4.11 ms), 5.0x (2.89 ms), 4.05x (3.59 ms), 6.2x (2.35 ms) and 6.4x (2.27 ms). The fair one-core, same-memory figure is **4.08x**. The faster builds also use more flash than CMSIS-NN (156–161 KB vs 94 KB). The ratios use CMSIS-NN with int8 weights. With its 4-bit kernel for fc1 (F27), CMSIS-NN's flash build gets 7% faster (17.41 ms), so every flash ratio above shrinks by about 7% (8.23x → 7.67x, 5.22x → 4.85x). Its SRAM build gets slower, so the SRAM ratios stand.
 
@@ -43,7 +47,7 @@ Setup for all numbers:
 
 All mafc rows were re-measured on 11 Nov with the branch-free ReLU (F14), which sped up every mafc build. The SMLAD rows are the v2 kernel (F15: conv1 on SMLAD too, no repacking, ReLU as one `USAT`). The earlier numbers (v0 8.83 ms, v1 4.80 ms, v1 + SMLAD 4.36 → 4.23 ms from SRAM) are in F13/F14, `results/phase1.csv` (the `notes` column says which version) and `results/README.md`.
 
-The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our two-core rows compare two cores with one; one core against one core, the best is 3.56 ms = **4.08x** (F17, F18). Accuracy: 99.47% for every ternary-pipeline build and 99.44% for CMSIS-NN, against 99.45% for the PyTorch model. Energy is **not measured yet**: the USB meter is too coarse for the Pico 2, so step 2b needs a finer instrument. **Run-to-run spread** on repeated builds of the same code: ≤0.2% from SRAM, up to 1.2% from flash (`results/phase1.csv`), so differences of a few percent between flash builds are near the noise.
+The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our two-core rows compare two cores with one; one core against one core, the best is 3.08 ms = **4.72x** (F28; 4.08x before it, F17, F18). Accuracy: 99.47% for every ternary-pipeline build and 99.44% for CMSIS-NN, against 99.45% for the PyTorch model. Energy is **not measured yet**: the USB meter is too coarse for the Pico 2, so step 2b needs a finer instrument. **Run-to-run spread** on repeated builds of the same code: ≤0.2% from SRAM, up to 1.2% from flash (`results/phase1.csv`), so differences of a few percent between flash builds are near the noise.
 
 ## Findings
 
@@ -559,14 +563,54 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - **Flash size:** CMSIS-NN with s4 is 80.7 KB, against 46–52 KB for our all-data builds and 156–161 KB for our fastest builds (2x).
 - **Data:** `results/phase0.csv` (rows of 14 Nov), `results/profile.csv` and `results/profile_stages.csv`.
 
+### F28. Best-of build: max pools fused into the convs and conv1 two rows at a time take the conv stack 22% lower; 1.67 ms on two cores and 4.72x CMSIS-NN like for like on one core (25 Nov 2026)
+- **Question:** did any build combine everything that worked? Not quite. The 1.99 ms build stacked ideas A, SMLAD, two cores and the shared kernel, but the two conv-stack fixes listed under "Open questions" (fuse pool1 into dw1, share loads in conv1) were never built, and the 4-row dense kernel (F24) came after it.
+- **Changes** (`compile.py --fuse-pool --row-pairs`, both exact):
+  - **Conv + max pool fused** (`emit_conv_pool_ch_smlad`): each step computes the 2x2 block of conv sums under one pooled output, keeps the maximum, and applies ReLU + shift once. Exact because `v -> USAT(v >> sh)` is monotone, so the max commutes with it. The 12x12 dw1 plane and the 4x4 dw2 plane are never stored, and both pool passes disappear. Applied to dw1 + pool1 and dw2 + pool2.
+  - **conv1 two output rows per step** (`emit_conv_ch_smlad_rows2`): input rows y+1 and y+2 feed both output rows, so 4 row loads serve 4 outputs instead of 6. The loop has 48 instructions per 4 outputs and 6 stack accesses (spills), against 2 × 24 with none, and is still faster.
+  - **fc2/fc3 in the 4-row dense format** (F24) instead of code in SRAM builds: the same speed, 24 KB less flash and SRAM.
+- **Tried and dropped:**
+  - Forcing `LDRD` for each row's two words (gcc splits a plain 8-byte load back into two `LDR`s): conv1 −2%, dw1 + pool1 +4%. Load latency is not what limits the kernel.
+  - Hand-interleaving the two conv rows inside the fused kernel: the same cycle count to the cycle. gcc already loads the shared rows once (same addresses, no stores between).
+  - Skipping uniform background patches in conv1: the images are normalised per image (the background is −47 to −19), and only 9% of conv1's output pairs have a uniform patch.
+- **Stage cycles** (two cores, SRAM, profiling builds, image 0; core 0's half of the conv stack):
+
+  | Stage | 1.99 ms build (F19) | + pools fused | + conv1 row pairs |
+  |---|---|---|---|
+  | conv1 | 127k | 128.5k | **118.9k** |
+  | dw1, pool1 | 94k + 23k | **81.6k** (fused) | 81.3k |
+  | dw2, pool2 | 13k + (in pool1's row) | **11.0k** (fused) | 11.1k |
+  | fc1 / fc2 / fc3 | 28k / 10k / 3k | 27.5k / 9.5k / 3.1k (fc2/fc3 dense) | same |
+  | **total** | about 300k | 261k | **252k** |
+
+- **Whole model** (10k images, bit-exact on the PC and on the board, `results/phase1.csv`, notes `best-of: ...`):
+
+  | Build | Before | Best-of | vs CMSIS-NN† | Flash | RAM |
+  |---|---|---|---|---|---|
+  | tern80, one core, SRAM (fc2/fc3 dense) | 3.56 ms | **3.08 ms** | **4.72x** like for like (14.52 ms) | 137.0 KB | 139.8 KB |
+  | tern80, two cores, SRAM (fc2/fc3 dense) | 1.99 ms | **1.67 ms** | 8.69x (two cores vs one) | 133.3 KB | 136.8 KB |
+  | tern80, two cores, SRAM (fc2/fc3 code) | 1.99 ms | 1.666 ms | 8.72x (two cores vs one) | 157.0 KB | 160.2 KB |
+  | tern80, one core, flash (linear as code in SRAM) | 3.59 ms | **3.14 ms** | 5.96x (5.55x vs CMSIS-NN's s4 flash build, F27) | 161.5 KB | 132.8 KB |
+  | tern80, two cores, flash (linear as code in SRAM) | 2.27 ms | **1.99 ms** | 9.39x (8.74x vs s4; two cores vs one) | 157.2 KB | 127.7 KB |
+  | tern80, two cores, flash, fc2/fc3 dense in flash | | 2.60 ms | (int4 layers through the cache: worse from flash) | 133.4 KB | 96.2 KB |
+  | fff80 (tree, 99.15%), one core, SRAM | 3.23 ms | **2.77 ms** | 5.25x, lower accuracy | 117.2 KB | 120.5 KB |
+  | fff80 (tree, 99.15%), two cores, SRAM | 1.86 ms | **1.53 ms** | 9.49x, lower accuracy, two cores vs one | 118.8 KB | 122.8 KB |
+
+  † CMSIS-NN int8 from the same memory (14.52 ms SRAM, 18.70 ms flash), on one core. Against a perfectly parallel two-core CMSIS-NN (≥ 7.26 ms) the two-core SRAM build would be at least 4.4x.
+- **Reading:**
+  - The fastest full-accuracy build is now 1.67 ms (−16%), and the like-for-like lead over CMSIS-NN is 4.72x (was 4.08x). The gain is all in the conv stack, which CMSIS-NN handles badly for this shape (F5), so the scope of Gate 1 is unchanged.
+  - The fastest build is also smaller than the old one (133 KB of flash and 137 KB of SRAM, against 156 and 161 KB), because fc2/fc3 are dense data instead of code.
+  - From flash, the int4 layers must stay as code in SRAM: dense in flash they go through the 16 KB cache with everything else (2.60 against 1.99 ms).
+  - conv1 is now 47% of the time on two cores. It is at 12 MACs and 4 loads per output pair in the shared-row loop; further gains need fewer instructions per MAC, not fewer loads.
+
 ## Gate 1
 
 **Met (11 Nov 2026), with a stated scope.** At equal accuracy (99.47% against 99.44%, bit-exact on 10k images):
-- **Like for like: 4.08x on one core** (3.56 ms vs 14.52 ms, both from SRAM; 3.75x before F18).
-  - That build uses about 1.7x CMSIS-NN's flash (161 vs 94 KB) and about 1.3x its SRAM.
+- **Like for like: 4.72x on one core** (3.08 ms vs 14.52 ms, both from SRAM; 3.75x before F18, 4.08x before F28).
+  - That build uses about 1.5x CMSIS-NN's flash (137 vs 94 KB) and about 1.1x its SRAM (140 vs 127 KB).
   - With less flash than CMSIS-NN (the all-data build, 49.5 KB), it is 2.78x.
 - **Not like for like:**
-  - 7.28x with both cores against CMSIS-NN's one (1.99 ms, F19). Against a perfectly parallel two-core CMSIS-NN it would be at least 3.6x.
+  - 8.69x with both cores against CMSIS-NN's one (1.67 ms, F28; 7.28x before). Against a perfectly parallel two-core CMSIS-NN it would be at least 4.4x.
   - 5.22x for a one-core flash build that keeps the linear layers as code in SRAM, against int8 CMSIS-NN entirely in flash (18.70 ms). Against CMSIS-NN's best flash build (fc1 as s4, 17.41 ms, F27) it is 4.85x, and against CMSIS-NN from SRAM 4.05x.
 
 Scope (F5, F17):
@@ -591,7 +635,7 @@ Scope (F5, F17):
 | Gate | Criterion | Status | Evidence |
 |---|---|---|---|
 | 0 | Board output = PyTorch, read as bit-exact with the integer golden model (F1); baseline numbers logged (HANDOFF §6); energy, step 2b (GETTING-STARTED.md) | **Met except energy** | F1; `results/phase0.csv` |
-| 1 | Beats CMSIS-NN at equal accuracy (HANDOFF §6) | **Met, with a stated scope:** 4.08x like for like on one core | "Gate 1"; F17, F27 |
+| 1 | Beats CMSIS-NN at equal accuracy (HANDOFF §6) | **Met, with a stated scope:** 4.72x like for like on one core (4.08x at the verdict; F28) | "Gate 1"; F17, F27 |
 | 2 | Two cores, DMA, PIO and ideas A–D, each against its keep-if threshold (roadmap; HANDOFF §7) | **Partly:** two cores, SIMD/DSP, DMA and ideas A, B and C are done. Idea D and PIO were not tried | Next table |
 | 3 | Tiny story model on the Pico, beating Atome's ~1 tok/s (roadmap) at the same model size (FEASIBILITY-STUDY.md, "What changes in the plan" #4) | **Met, not like for like** | F26; [lm.md](lm.md) |
 
@@ -614,7 +658,7 @@ Scope (F5, F17):
 |---|---|---|
 | The firmware is the model: no OS, no runtime, no model file, weights compiled into instructions | **MNIST: yes for the linear layers.** The compiler emits C per layer, and the linear layers become instructions (F16). The conv weights stay as data by choice (F20).<br>**Story model: partly.** It has no OS and no model file (the weights are linked into the firmware). But it runs on a hand-written runtime (`lm_rt.c`) that reads packed weights as data, by design from v0. 40% of its 0.89M ternary weights are zero; the ~530K non-zero ones as code would take about 3 MB at 5.6–6 bytes each (F16, F17), about six times the SRAM. Per token that would mean reading roughly 3 MB (dense) or 1.1 MB (tree, its path only) of code, against 223 / 82 KB of packed weights. Code for the small matrices only was not tried | Partly |
 | Every compute unit on the chip is used | Both cores, SIMD/DSP and DMA are used. DMA appears only in `--stream` builds; the fastest MNIST builds don't need it, and the story model doesn't use it. PIO and the SIO interpolators are unused | Partly |
-| A solid gain over a standard embedded runtime on small models, not 70x | 4.08x over CMSIS-NN like for like.<br>The margin is inflated by CMSIS-NN's weak kernels for this model's shape (F5).<br>On a wide conv the gain is 1.2–9x depending on the share of zero weights, and it loses when none are zero (F17).<br>Level with CMSIS-NN on int4 and int8 layers (F18, F24) | Yes, with that scope |
+| A solid gain over a standard embedded runtime on small models, not 70x | 4.08x over CMSIS-NN like for like (4.72x after F28, 25 Nov).<br>The margin is inflated by CMSIS-NN's weak kernels for this model's shape (F5).<br>On a wide conv the gain is 1.2–9x depending on the share of zero weights, and it loses when none are zero (F17).<br>Level with CMSIS-NN on int4 and int8 layers (F18, F24) | Yes, with that scope |
 | The gain is limited to models whose generated code fits in on-chip SRAM | **Direct evidence:** fc1 as code run from flash costs 611k cycles against 51k from SRAM (F16), and all-code from flash is 1.8–3x slower (F20).<br>**Story model** (packed data, not code): from flash it is 2.6x (tree) and 3.1x (dense) slower than from SRAM on two cores, partly because flash builds keep the matvec rows on core 0. On one core the gap is 1.8x and 2.1x (check models; lm.md).<br>Its SRAM builds fill about 475–482 KiB of the 512 KiB of main SRAM: 216 KB of packed weights, a 33 KB embedding and a 144 KB KV cache. So about 0.9M ternary weights is the ceiling for SRAM builds of this design with a 256-byte window | Yes |
 | Weights as code cost 2–4 bytes per non-zero weight | 5.6–6 bytes (F16, F17) | No: about 2x too low |
 | Phase 3: beat Atome's ~1 tok/s at the same model size | 310 tok/s (tree, SRAM, two cores) against 0.71 tok/s for Atome's own engine (437x), at 0.92M against 944K weights. Even our slowest build (dense, flash) runs at 48 tok/s.<br>This compares engines, not models: about 15x of the gap is Atome's engine recomputing the context for every token. Counting our prompt time makes 437x about 300x. A cached Atome engine is estimated (not built) at about 10 tok/s, which would leave about a 30x gap. On the board Atome fits only a 24-byte window (1.957 bits/byte there) (F26) | Yes, not like for like |
@@ -658,7 +702,7 @@ Phase 4 asks a different question: models larger than fast memory, with storage 
 | Idea C: DMA streaming of weights | F21: the stream FIFO with double-buffered DMA is 31% faster than reading in place for a 64 KB layer; keep. F23: in the compiler (`--stream`), the 30 KB fc1 runs 29% faster on one core and 58% faster than two cores sharing the cache | Done |
 | How much does SMLAD save? | All three convs (F13–F15): with the v2 kernel, 1.39x on two cores from SRAM (4.23 → 3.05 ms) | Done |
 | Best fc1 format: decode loop, code, bitplanes, lookup tables, sparse lists (idea A/E) | base3, sparse lists, code and dense SXTB16/SMLAD compared (F16): code wins from SRAM, and only code turns zeros into speed. Not tried: bitplanes, lookup tables | Done for 4 formats |
-| Where does the remaining time go? (two cores, all linear as code) | Join wait fixed (F19). Now conv1 42%, dw1 31%, pool1 8%, fc1 9%: the conv stack is about 85%. Candidates: fuse pool1 into dw1, conv1 channel pairs | Open |
+| Where does the remaining time go? (two cores, all linear as code) | Join wait fixed (F19). Pools fused into the convs and conv1 two rows per step (F28): 1.99 → 1.67 ms. Now conv1 47%, dw1 + pool1 32%, fc1 11%. Channel pairs for conv1 would need 12 kernel words in registers; not tried | Done (F28) |
 | Idea A: code vs data vs hybrid | F20: keep the hybrid (linear layers as code, conv weights as data) | Done |
 | Does the lead over CMSIS-NN survive a wide-channel model? (F5) | Wide-conv microbenchmark (F17): yes for ternary weights with ≥ ~14% zeros (1.19x at 33%, 1.65x at 50%, 9x at 90%); no for dense ternary (0.86x). F24: int8 layers are level with CMSIS-NN (no zeros to exploit). Still open: a whole wide model | Answered for one layer |
 | Make int4/int8 layers competitive (fc2/fc3 were 3.6x slower than CMSIS-NN) | F18: fc2 as code is level with CMSIS-NN (17.4k vs 16.6k cycles). F24: the 4-row dense kernel is level too (int4 fc2 16.5k; int8 fc2 16.5k vs 16.4k, int8 fc1 75.9k vs 70.9k) | Done (level, not ahead) |
