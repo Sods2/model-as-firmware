@@ -34,21 +34,10 @@ The real payoff is the path: the **model compiler** you build here (model in, fi
 
 A hardwired chip removes every layer between the model and the transistors. This project removes the same layers in software, on a chip you can already buy.
 
-```mermaid
-flowchart LR
-  subgraph N["Normal setup"]
-    direction TB
-    n1[Model file - data] --> n2[Runtime / interpreter] --> n3[Operating system] --> n4[Generic CPU]
-  end
-  subgraph T["This project: model as firmware"]
-    direction TB
-    t1[Model] --> t2[Compiler on PC] --> t3[Firmware = the model] --> t4[Existing chip: cores, SIMD, DMA, PIO]
-  end
-  subgraph H["Taalas HC1: model as silicon"]
-    direction TB
-    h1[Model] --> h2[Chip design] --> h3[Custom wiring - one model only]
-  end
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/three-ways-dark.svg">
+  <img alt="Three ways to run a model. Normal setup: model file (data), runtime or interpreter, operating system, generic CPU. This project, model as firmware: model, compiler on PC, firmware that is the model, existing chip with cores, SIMD, DMA and PIO. Taalas HC1, model as silicon: model, chip design, custom wiring for one model only." src="docs/diagrams/three-ways.svg">
+</picture>
 
 In a normal setup the model is data that a runtime interprets on top of an OS. Here a compiler on your PC turns the model into the program itself, which boots straight on the board and drives every compute unit. Taalas goes one step further and turns the program into wiring, which is why it is faster but can only ever run one model.
 
@@ -181,15 +170,10 @@ Eight candidate improvements, each tested on its own against the current design 
 
 Keep the bulk of the weights packed as data, where they are smallest, and compile everything else into code; only weights that are tiny and used on every input become instructions.
 
-```mermaid
-flowchart LR
-  M[Trained ternary model] --> C{Compiler}
-  C -->|layer order, loops, addresses, activations| CODE[Code in SRAM]
-  C -->|small hot weights, e.g. tree router nodes| HOT[Weights as instructions]
-  C -->|bulk weights, packed 2-bit| DATA[Data in flash]
-  HOT --> CODE
-  DATA -->|load + unpack at run time| CODE
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/hybrid-dark.svg">
+  <img alt="The compiler splits a trained ternary model three ways: layer order, loops, addresses and activations become code in SRAM; small hot weights such as tree router nodes become instructions; bulk weights stay packed 2-bit as data in flash, loaded and unpacked at run time. Both feed the code in SRAM." src="docs/diagrams/hybrid.svg">
+</picture>
 
 **Why test it:** it keeps the firmware small while removing the runtime interpreter, and it gives ideas B-D a place to live. The router nodes of idea B are the natural "hot weights": a few hundred values read for every token, small enough to sit in SRAM as code.
 
@@ -201,15 +185,10 @@ flowchart LR
 
 Three ideas that fit together inside each layer: search for the block of neurons that is needed, stream only its weights, and stop once the answer is confident.
 
-```mermaid
-flowchart LR
-  IN[Layer input] --> B["B: tree search<br/>a few yes/no decisions pick one branch"]
-  B --> C["C: DMA streams that branch's weights<br/>from flash while the core computes"]
-  C --> CMP[Compute branch only]
-  CMP --> D{"D: confident?"}
-  D -->|yes| OUT[Answer now, skip remaining layers]
-  D -->|no| NEXT[Next layer]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/bcd-in-a-layer-dark.svg">
+  <img alt="Inside one layer: B, a tree search, makes a few yes/no decisions to pick one branch; C, DMA streams that branch&#x27;s weights from flash while the core computes; only that branch is computed; D asks whether the answer is confident: if yes, answer now and skip the remaining layers, if no, go to the next layer." src="docs/diagrams/bcd-in-a-layer.svg">
+</picture>
 
 The gains do not multiply cleanly: the tree only speeds up the feedforward part of a layer (attention still runs in full), and early exit only skips whole layers. Each idea is tested alone first, then together.
 
@@ -248,22 +227,10 @@ The gains do not multiply cleanly: the tree only speeds up the feedforward part 
 
 Splitting every layer across several boards can cut latency and fit a larger model in on-chip memory; giving each board its own layers mostly adds capacity, not speed.
 
-```mermaid
-flowchart TB
-  subgraph P["Pipeline: one layer group per board"]
-    direction LR
-    p1[Board 1: layers 1-4] --> p2[Board 2: layers 5-8] --> p3[Board 3: layers 9-12] --> p4[Board 4: layers 13-16]
-    pn["One token visits boards in turn; others wait.<br/>Adds capacity, not speed."]
-  end
-  subgraph S["Split layer: every board holds a slice of every layer"]
-    direction TB
-    co[Coordinator: input, output, next token] --> s1[Board 1: 1/4 neurons]
-    co --> s2[Board 2: 1/4 neurons]
-    co --> s3[Board 3: 1/4 neurons]
-    co --> s4[Board 4: 1/4 neurons]
-    s1 & s2 & s3 & s4 -->|exchange small result vectors, one message per layer| co
-  end
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/pipeline-vs-split-dark.svg">
+  <img alt="Pipeline, one layer group per board: board 1 has layers 1-4, board 2 layers 5-8, board 3 layers 9-12, board 4 layers 13-16; one token visits the boards in turn while the others wait, which adds capacity, not speed. Split layer, every board holds a slice of every layer: a coordinator (input, output, next token) feeds four boards each holding a quarter of the neurons, and they exchange small result vectors back, one message per layer." src="docs/diagrams/pipeline-vs-split.svg">
+</picture>
 
 - **What:** each board holds a slice of every layer (for example a quarter of each layer's neurons on four Picos). All boards compute the same layer at the same time, then exchange their small result vectors before the next layer.
 - **Why not one layer per board:** layer 5 needs layer 4's result, so a single token visits the boards in turn while the others wait; the [ESP32-S3 cluster](https://pinggy.io/blog/esp32_s3_bitnet_llm_cluster/) shows latency growing with every board added. Reassigning a finished board to another layer does not help either: that layer's weights would have to be copied over a wire, which is slower than computing locally. A pipeline only pays off with many independent inputs in flight.
@@ -286,16 +253,10 @@ WiCi runs models far larger than memory by keeping weights on slow storage and m
 | System RAM | PSRAM, 8 MB (Pimoroni Pico Plus 2 only) | Large writable middle tier |
 | NVMe SSD | QSPI flash, 4 MB (Pico 2) or 16 MB (Pico Plus 2) | Holds every weight |
 
-```mermaid
-flowchart LR
-  R[Router / tree picks next block] --> Q{In SRAM cache?}
-  Q -->|hit| CMP[Compute from SRAM 520 KB]
-  Q -->|miss| RD["Aligned block read<br/>QSPI flash 4-16 MB or PSRAM 8 MB"]
-  RD --> CACHE[SRAM working-set cache]
-  CACHE --> CMP
-  PF[Prefetch most likely next block via DMA] -.-> CACHE
-  CMP --> R
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/sram-cache-dark.svg">
+  <img alt="Larger-than-SRAM loop: the router or tree picks the next block; if it is in the SRAM cache (hit), compute from the 520 KB SRAM; on a miss, do an aligned block read from QSPI flash (4-16 MB) or PSRAM (8 MB) into the SRAM working-set cache, then compute. A prefetch of the most likely next block via DMA fills the cache ahead of time. Compute then goes back to the router." src="docs/diagrams/sram-cache.svg">
+</picture>
 
 - **Why test it:** it attacks the flash bottleneck that limited [Atome LM](https://github.com/TilelliLab/atome-lm/releases/tag/esp32-silicon-v1) to about 1 token/s, and it lets models grow past SRAM without reading everything from flash every token. It pairs directly with idea B: tree branches play the role of experts, so only the chosen branch is fetched.
 - **Why it might not work:** a cache only helps when blocks are reused. A dense model reads every weight every token, so the cache would be refilled constantly and add overhead. Prediction can be wrong and waste a read. PSRAM and flash share the same kind of QSPI interface, so which is faster on this board must be measured, not assumed. WiCi's figures are its own measurements on PC hardware.
@@ -393,22 +354,10 @@ Model ceilings are planning estimates from memory size, not measured results. On
 
 Two halves: a compiler on your PC that turns a trained model into firmware, and a board that boots straight into that firmware and runs nothing else.
 
-```mermaid
-flowchart TB
-  subgraph PC["Build time - on the PC"]
-    direction LR
-    tr[Train ternary model in PyTorch] --> cp["Model compiler (Python)<br/>code per layer, fixed addresses, core split"] --> fw[Firmware image .uf2]
-  end
-  subgraph BRD["Run time - on the board, no OS"]
-    direction LR
-    in[Input via UART / USB] --> c0[Core 0: first half of layers]
-    c0 -->|activations via SRAM| c1[Core 1: second half]
-    c1 --> dma[DMA sends result out]
-    dma --> outp[Output]
-  end
-  fw -->|flash over USB or Debug Probe| BRD
-  outp -->|compare with PyTorch| test[PC test harness]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg">
+  <img alt="Build time, on the PC: train a ternary model in PyTorch; the model compiler (Python) emits code per layer with fixed addresses and a core split; the result is a .uf2 firmware image, flashed over USB or the Debug Probe. Run time, on the board with no OS: input via UART or USB goes to core 0 (first half of layers), activations pass via SRAM to core 1 (second half), DMA sends the result out as output, which the PC test harness compares with PyTorch." src="docs/diagrams/architecture.svg">
+</picture>
 
 Read it top to bottom. The compiler emits one code block per layer and fixes every memory address in advance. On the board, input arrives over UART or USB, core 0 runs the first half of the layers, hands its activations to core 1 through SRAM, and DMA sends the result back out while the cores start on the next input.
 
@@ -451,15 +400,10 @@ The biggest risk is memory, not compute: on every board the model's size is capp
 
 Six phases, each ending in a measurable gate; feasibility is answered by the end of Phase 3 on a $6 board, before any larger spend.
 
-```mermaid
-flowchart LR
-  P0["Phase 0<br/>Train ternary MNIST<br/>(reuse BitNetMCU)"] --> G0{Gate}
-  G0 --> P1["Phase 1<br/>Compile to Pico 2 firmware<br/>vs CMSIS-NN baseline"] --> G1{Gate}
-  G1 --> P2["Phase 2<br/>Dual core, DMA, PIO<br/>+ ideas A-D"] --> G2{Gate}
-  G2 --> P3["Phase 3<br/>Tiny story LM on Pico<br/>beat Atome ~1 tok/s"] --> G3{Gate}
-  G3 --> P4["Phase 4<br/>Bare-metal Pi 4 / Pi 5<br/>larger models, storage tier"] --> G4{Gate}
-  G4 --> P5["Phase 5<br/>FPGA via QONNX + hls4ml / FINN"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/phases-dark.svg">
+  <img alt="Six phases, each ending in a gate. Phase 0: train ternary MNIST (reuse BitNetMCU). Phase 1: compile to Pico 2 firmware vs the CMSIS-NN baseline. Phase 2: dual core, DMA, PIO plus ideas A-D. Phase 3: tiny story LM on the Pico, beat Atome at about 1 tok/s. Phase 4: bare-metal Pi 4 / Pi 5, larger models, storage tier. Phase 5: FPGA via QONNX + hls4ml / FINN." src="docs/diagrams/phases.svg">
+</picture>
 
 Durations are rough part-time estimates, not researched figures. Each gate is a go or no-go: if Phase 1 cannot beat the CMSIS-NN baseline at equal accuracy, the idea still holds for code size and determinism, but the speed claim should be dropped or revisited before scaling.
 

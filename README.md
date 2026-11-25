@@ -4,11 +4,10 @@ Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model 
 
 The plan starts on a Raspberry Pi Pico 2, then moves to a Pi 4 or Pi 5, and later an FPGA.
 
-```mermaid
-flowchart LR
-  M[Trained ternary model] --> C[Model compiler on PC] --> F[Firmware = the model] --> B[Pico 2 / Pi 4 / Pi 5, no OS]
-  C -. same compiler, later .-> FPGA[FPGA via hls4ml / FINN]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/overview-dark.svg">
+  <img alt="Trained ternary model, then the model compiler on the PC, then firmware that is the model, running on a Pico 2, Pi 4 or Pi 5 with no OS. Later the same compiler targets an FPGA via hls4ml or FINN." src="docs/diagrams/overview.svg">
+</picture>
 
 ## Verdict
 
@@ -16,39 +15,10 @@ Feasible as a proof of concept, but expect a solid improvement over a standard e
 
 ## How it works
 
-```mermaid
-flowchart TB
-  subgraph PC["On the PC"]
-    direction TB
-    T["train/: BitNetMCU training<br/>ternary MNIST CNN"] --> H["Exported model header<br/>train/export/*.h"]
-    H --> FE["Compiler front end<br/>compiler/mafc"]
-    FE --> IR["IR: conv, pool, relu_norm, linear, argmax"]
-    IR --> I["IR interpreter (numpy)"]
-    IR --> BD["bounds.py<br/>proves value ranges (int16 where safe)"]
-    BD --> BE["RP2350 back end<br/>2 cores, SMLAD, branch-free ReLU"]
-    BE --> GEN["Generated C<br/>firmware/rp2350/mafc/gen/"]
-    GEN --> SDK["Pico SDK build + picotool flash"]
-    G["Golden model<br/>harness/golden.py (exact integer numpy)"]
-    I -. "must match" .-> G
-    R["harness/run.py, measure.sh<br/>send images, check, time"]
-    R --> CSV["results/*.csv, notes/FINDINGS.md"]
-    G -. "expected logits" .-> R
-  end
-
-  subgraph BOARD["On the Pico 2 (bare metal, no OS)"]
-    direction LR
-    C0["Core 0<br/>half the channels, then fc layers, argmax"]
-    C1["Core 1<br/>other half (job loop on SIO FIFO)"]
-    MEM["Weights as const arrays<br/>flash (XIP cache) or SRAM"]
-    MEM --> C0
-    MEM --> C1
-    C1 -- "join" --> C0
-  end
-
-  SDK -- "firmware = the model" --> BOARD
-  R -- "image over USB serial" --> C0
-  C0 -- "prediction, logits, cycle count" --> R
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/how-it-works-dark.svg">
+  <img alt="How it works. On the PC: BitNetMCU training of a ternary MNIST CNN exports a model header; the compiler front end (compiler/mafc) builds an IR of conv, pool, relu_norm, linear and argmax; bounds.py proves value ranges; the RP2350 back end (2 cores, SMLAD, branch-free ReLU) generates C, which the Pico SDK builds and picotool flashes. An IR interpreter must match the exact-integer golden model, whose expected logits feed harness/run.py and measure.sh, which write results/*.csv and notes/FINDINGS.md. The firmware is the model: on the Pico 2, bare metal, weights are const arrays in flash or SRAM; core 0 takes half the channels then the fc layers and argmax, core 1 the other half, joining core 0. The harness sends an image over USB serial and gets back the prediction, logits and cycle count." src="docs/diagrams/how-it-works.svg">
+</picture>
 
 One inference: conv1 → dw1 → pool1 → dw2 → pool2 (run per channel, split across the two cores) → relu_norm → fc1 (ternary) → fc2 → fc3 → argmax. Every build has to match the golden model bit for bit on all 10,000 test images before its timing counts.
 
