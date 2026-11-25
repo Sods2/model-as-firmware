@@ -6,14 +6,10 @@
 
 Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model file. A compiler on the PC turns a trained **ternary** model (weights −1, 0, +1) into the board's firmware, using every compute unit the chip has (so far both cores, DSP/SIMD instructions and DMA; PIO is planned). It is a software version of Taalas-style "model printed into the chip" hardware. The plan starts on a **Raspberry Pi Pico 2** and later moves to a Pi 4 or Pi 5, and eventually an FPGA.
 
-```mermaid
-flowchart LR
-  T["Train ternary model<br/>(PyTorch, on PC)"] --> C["Model compiler<br/>(Python, to build)"]
-  C --> F["Firmware image<br/>= the model"]
-  F --> P["Pico 2<br/>(now)"]
-  C -.later.-> PI["Pi 4 / Pi 5<br/>bare metal"]
-  C -.later.-> FP["FPGA via<br/>QONNX + hls4ml / FINN"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/handoff-overview-dark.svg">
+  <img alt="Train a ternary model (PyTorch, on the PC), then the model compiler (Python, to build) produces a firmware image that is the model, for the Pico 2 now. Later the compiler also targets a bare-metal Pi 4 / Pi 5 and an FPGA via QONNX + hls4ml / FINN." src="docs/diagrams/handoff-overview.svg">
+</picture>
 
 ## 2. Honest verdict (unchanged)
 
@@ -70,33 +66,20 @@ flowchart LR
 
 ## 5. Hardware setup (once parts arrive)
 
-```mermaid
-flowchart LR
-  PC["PC / laptop<br/>build + test harness"] -- USB --> DP["Debug Probe<br/>(CMSIS-DAP)"]
-  DP -- "SWD cable<br/>(3-pin JST)" --> P2["Pico 2 #1<br/>target"]
-  DP -- "UART cable" --> P2
-  PC -- "USB<br/>power + flashing" --> P2
-  PC -- "USB power meter<br/>(mWh)" --- P2
-  P2 -. "idea F later:<br/>jumper wires, star layout" .- P3["Pico 2 #2, #3"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/hardware-setup-dark.svg">
+  <img alt="Hardware setup. The PC or laptop (build and test harness) connects over USB to the Debug Probe (CMSIS-DAP), which reaches Pico 2 #1, the target, by an SWD cable (3-pin JST) and a UART cable. The PC also powers and flashes the Pico over USB, through a USB power meter (mWh). Later, for idea F, Pico 2 #2 and #3 join with jumper wires in a star layout." src="docs/diagrams/hardware-setup.svg">
+</picture>
 
 - The Debug Probe gives SWD debugging (breakpoints, step through) and a UART serial link to the Pico without soldering.
 - **Pi 4 later:** a spare Pico can act as a JTAG probe for the Pi 4. Run dirtyJtag or JTAGprobe firmware on it, set `enable_jtag_gpio=1` in `config.txt`, and use GPIO 22–27.
 
 ## 6. Where to start: Phase 0 and Phase 1 step by step
 
-```mermaid
-flowchart TB
-  S1["1. Toolchain<br/>Pico SDK + arm-none-eabi-gcc + picotool + OpenOCD"] --> S2["2. Blink + UART hello<br/>on the Pico 2 via Debug Probe"]
-  S2 --> S3["3. Reproduce BitNetMCU<br/>train ternary MNIST on PC"]
-  S3 --> S4["4. Plain-C reference inference<br/>on Pico 2 (packed weights)"]
-  S4 --> S5["5. CMSIS-NN int8 baseline<br/>same task"]
-  S5 --> S6["6. Test harness<br/>PC script compares board vs PyTorch"]
-  S6 --> G0{"Gate 0:<br/>board output = PyTorch?<br/>baseline numbers logged?"}
-  G0 --> S7["7. Compiler v0<br/>model → C per layer"]
-  S7 --> S8["8. Idea A: three builds<br/>all-code / all-data / hybrid"]
-  S8 --> G1{"Gate 1:<br/>beats CMSIS-NN<br/>at equal accuracy?"}
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/first-steps-dark.svg">
+  <img alt="Phase 0 and Phase 1 step by step. 1: toolchain (Pico SDK, arm-none-eabi-gcc, picotool, OpenOCD). 2: blink and UART hello on the Pico 2 via the Debug Probe. 3: reproduce BitNetMCU, training ternary MNIST on the PC. 4: plain-C reference inference on the Pico 2 (packed weights). 5: CMSIS-NN int8 baseline, same task. 6: test harness, a PC script comparing board and PyTorch. Gate 0: board output equals PyTorch and baseline numbers logged? 7: compiler v0, model to C per layer. 8: idea A, three builds (all-code, all-data, hybrid). Gate 1: beats CMSIS-NN at equal accuracy?" src="docs/diagrams/first-steps.svg">
+</picture>
 
 1. **Toolchain.** Install the Pico SDK, `arm-none-eabi-gcc`, CMake, `picotool` and the Raspberry Pi fork of OpenOCD. The VS Code "Raspberry Pi Pico" extension installs all of these at once. Build with `PICO_BOARD=pico2`. Debug with `openocd -f interface/cmsis-dap.cfg -f target/rp2350.cfg`.
 2. **Blink and UART "hello"** to prove that flashing, debugging and serial all work.
@@ -120,16 +103,10 @@ flowchart TB
 
 ## 7. After Phase 1: idea test order
 
-```mermaid
-flowchart LR
-  A["A<br/>code vs data split"] --> C["C<br/>DMA streaming"] --> B["B<br/>tree-routed neurons<br/>(most novel)"] --> D["D<br/>early exit"]
-  B --> H["H<br/>prompt batching"]
-  B --> G["G<br/>SRAM cache over flash"]
-  D --> F["F<br/>split layers<br/>across 3 Picos"]
-  G --> BIG["Larger-than-memory goal<br/>Pi 4 + USB SSD"]
-  H --> BIG
-  E["E<br/>lookup-table maths<br/>(only if time)"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/idea-order-dark.svg">
+  <img alt="Idea test order after Phase 1: A (code vs data split), then C (DMA streaming), then B (tree-routed neurons, the most novel). B leads to D (early exit), H (prompt batching) and G (SRAM cache over flash). D leads to F (split layers across 3 Picos). G and H lead to the larger-than-memory goal on a Pi 4 with a USB SSD. E (lookup-table maths) only if time." src="docs/diagrams/idea-order.svg">
+</picture>
 
 | Idea | One-line test | Keep if (starting target) |
 | --- | --- | --- |
