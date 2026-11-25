@@ -11,9 +11,9 @@ output 8x8x32 int8. Requantization is the same for every kernel: out = clamp(rou
 which is exactly CMSIS-NN's requantize with multiplier 2^30 and shift 1 - sh (single rounding). So all kernels
 must produce identical bytes.
 
-  train/.venv/Scripts/python.exe harness/bench_conv.py gen
+  python harness/bench_conv.py gen
   (build + flash firmware/bench/conv_wide, RUN_FROM_RAM=ON/OFF)
-  train/.venv/Scripts/python.exe harness/bench_conv.py run --port COM3 --csv results/bench_conv.csv
+  python harness/bench_conv.py run --port COM3 --csv results/bench_conv.csv
 """
 import argparse
 import csv

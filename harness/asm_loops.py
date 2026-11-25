@@ -1,9 +1,8 @@
 """List the loops (backward branches) in a ref_infer disassembly, with instruction, IT, branch-free-ReLU (bic asr #31),
 branch, SMLA* and stack-access ([sp]) counts per loop body. Used to check the back end's hot loops after a change (notes/compiler.md, v1 step 3).
 
-  OD=~/.pico-sdk/toolchain/15_2_Rel1/bin/arm-none-eabi-objdump.exe
-  $OD -d --no-show-raw-insn <build>/mafc.elf | awk '/<ref_infer>:/{f=1} f{print} f&&/^$/{exit}' > ref_infer.s
-  train/.venv/Scripts/python.exe harness/asm_loops.py [--max N] ref_infer.s [more.s ...]
+  arm-none-eabi-objdump -d --no-show-raw-insn <build>/mafc.elf | awk '/<ref_infer>:/{f=1} f{print} f&&/^$/{exit}' > ref_infer.s
+  python harness/asm_loops.py [--max N] ref_infer.s [more.s ...]
 
 --max: longest loop body listed (default 120; raise it to see fully unrolled loops). Stack accesses inside a hot
 loop are register spills, the first thing to look at when a loop is slower than its instruction mix suggests.

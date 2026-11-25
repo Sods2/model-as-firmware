@@ -1,6 +1,6 @@
 """Report the zero fraction of every Ternary layer in a trained BitNetMCU model.
 
-Usage (from train/BitNetMCU):  ../.venv/Scripts/python.exe ../sparsity_report.py <config.yaml> <model.pth>
+Usage (from train/BitNetMCU):  python ../sparsity_report.py <config.yaml> <model.pth>
 """
 import os
 import sys

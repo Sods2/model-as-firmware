@@ -1,7 +1,7 @@
 """Run MafLM firmware (firmware/rp2350/maflm) on the Pico 2: check it bit-exact against the integer reference, then
 time greedy generation.
 
-    train/.venv/Scripts/python.exe harness/lm_run.py --npz train/runs/check_tree.npz --csv results/phase3.csv
+    python harness/lm_run.py --npz train/runs/check_tree.npz --csv results/phase3.csv
 
 1. Exactness: --check sequences of TinyStories V2-valid, --check-len tokens each from an empty KV cache; for every
    position the board's argmax and logits checksum (sum_i logits[i] * (2i+1) mod 2^64) must equal the reference's.

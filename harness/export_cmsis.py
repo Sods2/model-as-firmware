@@ -10,7 +10,7 @@ static scales instead of BitNetMCU's per-image shifts change the arithmetic, not
 
 Writes firmware/baselines/cmsis_nn/model_s8_<model>.h; harness/golden.py:GoldenS8 reads it back.
 
-Usage: train/.venv/Scripts/python.exe harness/export_cmsis.py --model tern80
+Usage: python harness/export_cmsis.py --model tern80
 """
 import argparse
 import math

@@ -3,7 +3,7 @@
 Independent of intref.py's batched GPU code (no float matmuls); used to check that the batched reference and
 incremental decoding give bit-identical logits, and as the golden model for the board.
 
-    .venv/Scripts/python.exe lm/intref_step.py --pt runs/check_tree.pt
+    python lm/intref_step.py --pt runs/check_tree.pt
 """
 from __future__ import annotations
 

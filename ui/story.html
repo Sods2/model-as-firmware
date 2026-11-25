@@ -96,6 +96,11 @@ svg text { font-family: var(--mono); font-size: 11px; fill: var(--dim); }
 .banner.done { background: var(--panel); border: 1px solid var(--ok-line); }
 .banner .t { font-weight: 700; }
 .banner.bad .t { color: var(--bad); }
+.help { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-size: 13px; color: var(--text2); }
+.help summary { cursor: pointer; font-weight: 600; color: var(--text); min-height: 24px; }
+.help ul { margin: 10px 0 4px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; max-width: 110ch; }
+.help b { color: var(--text); font-weight: 600; }
+.help code { font-family: var(--mono); font-size: 12px; }
 .caveat { font-size: 13px; color: var(--text2); background: var(--panel2); border-left: 3px solid var(--warn); border-radius: 6px; padding: 10px 14px; margin: 0; }
 .hidden { display: none !important; }
 </style>
@@ -120,6 +125,19 @@ svg text { font-family: var(--mono); font-size: 11px; fill: var(--dim); }
 </header>
 
 <div id="banner" class="banner hidden" role="alert"></div>
+
+<details class="help">
+  <summary>What am I looking at?</summary>
+  <ul>
+    <li><b>MafLM</b> is a tiny ternary language model trained on children's stories. It reads and writes one <b>byte</b> (one character) at a time, so each byte is one <b>position</b>, up to a 256-byte <b>window</b>.</li>
+    <li>Type a prompt and press Generate. Every position runs on the <b>target</b> and on the <b>golden model</b> (an independent Python copy of the same integer arithmetic). It counts as checked only if both pick the same next byte and their 64-bit <b>logits checksum</b> (a fingerprint of all 256 scores) is equal.</li>
+    <li><b>Greedy</b> always takes the top-scoring byte, as the timed runs do. A <b>temperature</b> samples from the scores instead (higher = more random); the seed makes it repeatable.</li>
+    <li><b>KV cache</b>: what the model remembers of earlier positions. Attention reads all of it, so each byte costs a little more than the last.</li>
+    <li>The <b>tree twin</b> replaces each feedforward layer with a small binary tree: 3 left/right decisions (<b>L</b>/<b>R</b>) pick one leaf of 80 neurons, so it reads 1/8 of the weights. The <b>dense twin</b> reads them all.</li>
+    <li>Times are the board's cycle counts (none for the golden model). Per-stage shares need a profiling build (<code>-DLM_PROFILE=ON</code>).</li>
+  </ul>
+  <p class="note">Full guide, panel by panel: <code>docs/UI-GUIDE.md</code> in the repository.</p>
+</details>
 
 <section class="panel" aria-labelledby="promptH">
   <div class="panel-head">
@@ -234,7 +252,7 @@ svg text { font-family: var(--mono); font-size: 11px; fill: var(--dim); }
   <section class="panel" aria-labelledby="useH">
     <div class="panel-head">
       <h2 id="useH">Leaf usage, this generation</h2>
-      <span class="note">Balanced routing means each leaf near 12.5%.</span>
+      <span class="note" id="useNote">Balanced routing means each leaf near 12.5%.</span>
     </div>
     <div id="usage" style="display:flex;flex-direction:column;gap:4px"></div>
   </section>
@@ -244,6 +262,13 @@ svg text { font-family: var(--mono); font-size: 11px; fill: var(--dim); }
   <div class="panel-head">
     <h2 id="cmpH">Saved board runs (results/phase3.csv)</h2>
     <span class="note">Bytes per second, log scale. Green: this generation.</span>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:#6CB4FF"></span>MafLM tree twin</span>
+    <span><span class="sw" style="background:#E2B84F"></span>MafLM dense twin</span>
+    <span><span class="sw" style="background:#7D8893"></span>Atome LM, its own engine (outside reference)</span>
+    <span><span class="sw" style="background:var(--ok)"></span>this generation</span>
+    <span>Names: <code class="mono">maflm_v1_lm_&lt;twin&gt;_&lt;ram|flash&gt;_dual</code> = weights in SRAM or flash, both cores.</span>
   </div>
   <div class="controls">
     <label class="inline">Window
@@ -315,6 +340,10 @@ function addToken(t) {
   const span = el('span', { class: 'ch' + (t.phase === 'prompt' ? ' p' : '') + (t.golden_ok ? '' : ' bad') + (t.byte === 10 ? ' nl' : ''), 'data-pos': t.pos, tabindex: '-1' });
   span.textContent = textOf(t.byte);
   colourSpan(span, t);
+  if ($('colour').value === 'time' && t.ms != null) {
+    const ms = S.tokens.filter(x => x && x.ms != null && x.phase === 'gen').map(x => x.ms), key = Math.min(...ms) + '|' + Math.max(...ms);
+    if (key !== S.timeRange) { S.timeRange = key; setTimeout(recolour, 0); }
+  }
   const box = $('story'), caret = box.querySelector('.caret');
   box.insertBefore(span, caret);
   if (!caret) box.append(el('span', { class: 'caret', 'aria-hidden': 'true' }));
@@ -353,6 +382,7 @@ function renderInfo() {
   if (i.rate != null) { S.rate = i.rate; $('rate').value = String(i.rate); }
   $('colour').querySelector('[value=leaf]').disabled = !i.tree;
   $('useH').parentElement.parentElement.classList.toggle('hidden', !i.tree);
+  if (i.tree) $('useNote').textContent = `Balanced routing means each leaf near ${fmt(100 / i.leaves, 1)}%.`;
 }
 
 function renderBanner() {
@@ -369,7 +399,8 @@ function renderBanner() {
         el('button', { type: 'button', class: 'btn', onclick: () => post('/control?cmd=resume') }, 'Resume anyway')));
   } else if (st.state === 'disconnected') {
     b.className = 'banner lost';
-    b.append(el('div', { style: 'display:flex;flex-direction:column;gap:4px' }, el('span', { class: 't' }, 'Disconnected'), el('span', { class: 'note' }, st.reason || '')));
+    b.append(el('div', { style: 'display:flex;flex-direction:column;gap:4px' }, el('span', { class: 't' }, 'Stopped by an error'), el('span', { class: 'note' }, st.reason || '')),
+      el('button', { type: 'button', class: 'btn primary', onclick: () => $('genForm').requestSubmit() }, 'Try again'));
   } else if (st.state === 'done') {
     const s = S.summary || {};
     b.className = 'banner done';
@@ -383,9 +414,14 @@ function renderKpis() {
   $('kPos').textContent = fmt(n); $('kPos').append(el('span', { style: 'color:var(--dim);font-size:15px' }, ' / ' + fmt(win)));
   $('kProg').style.width = (n / win * 100) + '%';
   const g = $('kGold');
-  g.textContent = s.checked ? fmt((s.checked - s.mismatches) / s.checked * 100, 1) + '%' : '—';
-  g.style.color = s.mismatches ? 'var(--bad)' : (s.checked ? 'var(--ok)' : '');
-  $('kGoldS').textContent = s.checked ? `${fmt(s.checked)} positions, ${fmt(s.mismatches)} mismatches` : '';
+  if (S.info && S.info.target === 'golden') {
+    g.textContent = 'n/a'; g.style.color = '';
+    $('kGoldS').textContent = 'this target is the golden model';
+  } else {
+    g.textContent = s.checked ? fmt((s.checked - s.mismatches) / s.checked * 100, 1) + '%' : '—';
+    g.style.color = s.mismatches ? 'var(--bad)' : (s.checked ? 'var(--ok)' : '');
+    $('kGoldS').textContent = s.checked ? `${fmt(s.checked)} positions, ${fmt(s.mismatches)} mismatches` : '';
+  }
   const last = S.tokens[n - 1], hz = S.info && S.info.sys_hz;
   $('kLast').textContent = last && last.ms != null ? fmt(last.ms, 2) + ' ms' : '—';
   $('kLastS').textContent = last && last.cycles != null ? fmt(last.cycles) + ' cycles' : (S.info && !hz ? 'no cycle counter on this target' : '');
@@ -413,7 +449,8 @@ function renderToken() {
   $('tokNext').textContent = show(t.next);
   const badge = (cls, text) => el('span', { class: 'badge ' + cls }, (cls === 'ok' ? '✓ ' : '✗ ') + text);
   $('tokBadges').replaceChildren(...[
-    t.golden_ok ? badge('ok', 'board = golden (argmax and checksum)') : badge('bad', 'board ≠ golden'),
+    S.info && S.info.target === 'golden' ? badge('ok', 'golden model (no board to check)')
+      : t.golden_ok ? badge('ok', 'board = golden (argmax and checksum)') : badge('bad', 'board ≠ golden'),
     S.gen && S.gen.temp > 0 && t.phase === 'gen' && t.next !== t.board_argmax ? el('span', { class: 'badge warn' }, `sampled; the board's argmax was ${show(t.board_argmax)}`) : null].filter(Boolean));
   const mx = Math.max(...t.top.map(c => c[1]), 1e-9);
   $('cands').replaceChildren(...t.top.map(([b, p]) => el('div', { class: 'cand' + (b === t.next ? ' pick' : '') },
@@ -423,7 +460,7 @@ function renderToken() {
     $('ffnTitle').textContent = `Tree feedforward: the leaf each layer picked (${i.depth} decisions, ${i.leaves} leaves of ${i.leaf} neurons)`;
     $('ffn').replaceChildren(...t.leaves.map((lf, L) => el('div', { class: 'leafrow' }, el('span', {}, 'L' + (L + 1)),
       ...Array.from({ length: i.leaves }, (_, k) => el('div', { class: 'c' + (k === lf ? ' on' : ''), style: k === lf ? 'background:' + LEAF[k] : '', title: `leaf ${k}` })),
-      el('span', {}, 'leaf ' + lf + ' ' + pathOf(lf, i.depth)))),
+      el('span', { title: `The path through the tree: at each of the ${i.depth} decisions, L = left, R = right` }, 'leaf ' + lf + ' ' + pathOf(lf, i.depth)))),
       el('p', { class: 'note', style: 'font-size:12px' }, `Reads ${i.depth} node rows plus one leaf per layer instead of all ${i.hidden} neurons. From the golden model; the checksum makes it the board's path too.`));
   } else {
     $('ffnTitle').textContent = 'Dense feedforward';

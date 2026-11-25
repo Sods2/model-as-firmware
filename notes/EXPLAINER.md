@@ -124,7 +124,7 @@ It was checked bit-exact at three levels: Python, the C on the PC, and the C on 
 
 Done since this guide was first written: both cores, dual 16-bit multiplies, idea A (weights as instructions), the tree layer (idea B), weight streaming (idea C), and a tiny story-writing model (Phase 3). Still open:
 
-- **Energy per inference:** needs a finer current meter than the USB one on hand.
+- **Energy per inference:** needs a finer current meter than the USB one used here.
 - **A model bigger than the chip's fast memory,** where reading from flash sets the speed.
 
 Further ideas and questions, with their tests and outcomes, are in [IDEAS.md](IDEAS.md).

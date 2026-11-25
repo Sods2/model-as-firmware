@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build, flash and measure any set of builds on the Pico 2 (Git Bash, from the repo root).
+# Build, flash and measure any set of builds on the Pico 2 (bash from the repo root; Git Bash on Windows).
 #
 #   harness/measure.sh <profile|final|energy> <csv> <build:model:mem[:ternary[:int4[:conv[:stream[:int8[:fuse]]]]]]> ...
 #     build  ref_c | cmsis_nn | cmsis_nn_s4 (fc1 as CMSIS-NN s4) | mafc | mafc2 (dual-core) | mafc_s (SMLAD) | mafc2_s (dual-core + SMLAD)
-#     model  tern80 | tern80z70 | tern80z90 | int8_80 (all linear layers int8)
+#     model  tern80 | tern80z70 | tern80z90 | int8_80 (all linear layers int8) | fff80 (idea B tree; mafc builds only)
 #     mem    flash | ram          (ram = copy_to_ram: code and weights in SRAM)
 #     ternary  base3 (default) | sparse | code | dense   (mafc builds: format of fc1, compile.py --ternary)
 #     int4     packed (default) | code | dense           (mafc builds: format of fc2/fc3, compile.py --int4)
@@ -21,10 +21,7 @@
 #   FLASH=usb harness/measure.sh ...     flashes with picotool instead of SWD (default auto: SWD, then picotool)
 set -euo pipefail
 MODE=$1; CSV=$2; shift 2
-PORT=${PORT:-COM3}
-P=~/.pico-sdk
-export PATH="$P/cmake/v4.3.4/bin:$P/ninja/v1.13.2:$P/toolchain/15_2_Rel1/bin:$PATH"
-PY=train/.venv/Scripts/python.exe
+. harness/env.sh     # PY, PORT and the toolchain on PATH; override any of them in the environment
 
 if [ "$MODE" = profile ]; then N=200; PROF=ON; SUFFIX=-prof; else N=10000; PROF=OFF; SUFFIX=; fi
 case $MODE in profile|final|energy) ;; *) echo "unknown mode $MODE"; exit 1 ;; esac

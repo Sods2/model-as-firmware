@@ -1,5 +1,5 @@
 # Idea C benchmark (FINDINGS F21): DMA streaming of weights from flash vs reading them through the XIP cache.
-# Generate the data first:  train/.venv/Scripts/python.exe harness/bench_stream.py gen
+# Generate the data first:  python harness/bench_stream.py gen
 # Always a flash build (the weights must stay in flash); the kernels run from SRAM (__not_in_flash_func).
 
 cmake_minimum_required(VERSION 3.13)

@@ -9,7 +9,7 @@ Rows of the same build are averaged (run the profile several times for repeats).
     each other; there is no per-core timer on core 1);
   - fc1 is wall time with both cores working on half the rows each.
 
-Usage: train/.venv/Scripts/python.exe harness/contention.py results/contention_stages.csv results/contention_stages_dual.csv
+Usage: python harness/contention.py results/contention_stages.csv results/contention_stages_dual.csv
 """
 import csv
 import statistics as st

@@ -4,16 +4,16 @@ happens to a browser.
 Serves the live UI (ui/live.html) and a Server-Sent Events stream on http://127.0.0.1:8765.
 Nothing to install beyond what run.py already needs (numpy, torch/torchvision for MNIST, pyserial for pico).
 
-Usage (Git Bash, from the repo root), then open http://127.0.0.1:8765:
-  PY=train/.venv/Scripts/python.exe
-  $PY harness/bridge.py --target golden                     # no hardware
-  $PY harness/bridge.py --target host --exe firmware/baselines/ref_c/build-host/ref_host_tern80.exe
-  $PY harness/bridge.py --target pico --port COM3           # flash a *_prof build to see per-stage cycles
+Usually started for you by the test launcher (harness/launcher.py). By hand, from the repo root with the venv's
+python (docs/SETUP.md), then open http://127.0.0.1:8765:
+  python harness/bridge.py --target golden                     # no hardware
+  python harness/bridge.py --target host --exe firmware/baselines/ref_c/build-host/ref_host_tern80.exe
+  python harness/bridge.py --target pico --port COM3           # /dev/ttyACM0 on Linux; a *_prof build shows per-stage cycles
 
 Story mode (harness/story_live.py, ui/story.html): chosen by itself when the board runs a MafLM build, or with
 --task story:
-  $PY harness/bridge.py --task story --target golden --npz train/runs/lm_tree.npz   # no hardware
-  $PY harness/bridge.py --target pico --port COM3 --prompt "Once"                  # board with a maflm build
+  python harness/bridge.py --task story --target golden --npz train/runs/lm_tree.npz   # no hardware
+  python harness/bridge.py --target pico --port COM3 --prompt "Once"                  # board with a maflm build
 
 Endpoints:
   GET  /                  the UI
@@ -334,6 +334,7 @@ class Runner(threading.Thread):
                 'build': self.meta.get('build', ''), 'sys_hz': int(self.meta.get('sys_hz', 0)),
                 'port': self.args.port or '', 'n_images': len(self.img8),
                 'golden': 'ref' if isinstance(self.golden, Golden) else 's8', 'stage_names': STAGES,
+                'weight_kinds': {k: weight_kind(getattr(self.golden, k, None)) for k in ('fc1', 'fc2', 'fc3')},
                 'rate': self.rate, 'home': self.args.home}
         self.hub.publish(info)
         self.status('paused' if self.paused else 'streaming')
@@ -387,18 +388,37 @@ class Runner(threading.Thread):
                 'layers': {k: {'shape': list(v.shape), 'data': v.astype(int).ravel().tolist()} for k, v in tr.items()}}
 
     def weights(self):
-        w = self.golden.fc1
-        return {'layer': 'fc1', 'shape': list(w.shape),
-                'rows': [''.join('nzp'[int(v) + 1] for v in row) for row in w],
-                'counts': {'neg': int((w == -1).sum()), 'zero': int((w == 0).sum()), 'pos': int((w == 1).sum())}}
+        w = getattr(self.golden, 'fc1', None)
+        if w is None:
+            return {'error': 'this golden model has no plain FC1 weight matrix'}
+        w = np.asarray(w)
+        out = {'layer': 'fc1', 'shape': list(w.shape), 'kind': weight_kind(w),
+               'counts': {'neg': int((w < 0).sum()), 'zero': int((w == 0).sum()), 'pos': int((w > 0).sum())}}
+        if out['kind'] == 'ternary':
+            out['rows'] = [''.join('nzp'[int(v) + 1] for v in row) for row in w]
+        else:                                   # 4-bit or 8-bit weights: send the values, drawn as a heatmap
+            out['values'] = w.astype(int).ravel().tolist()
+            out['absmax'] = int(np.abs(w).max())
+        return out
 
 
-def phase0_rows():
-    p = ROOT / 'results' / 'phase0.csv'
-    if not p.exists():
-        return []
-    with open(p, newline='') as f:
-        return list(csv.DictReader(f))
+def weight_kind(w) -> str:
+    """'ternary', '4-bit' or '8-bit' from the integer values of a weight matrix ('' if there is none)."""
+    if w is None:
+        return ''
+    a = int(np.abs(np.asarray(w)).max())
+    return 'ternary' if a <= 1 else ('4-bit' if a <= 15 else '8-bit')   # 4-bit symmetric codes are odd, up to +-15
+
+
+def saved_rows():
+    """Saved board runs for the latency chart: the Phase 0 baselines and the compiler's builds (Phase 1)."""
+    rows = []
+    for name in ('phase0', 'phase1'):
+        p = ROOT / 'results' / f'{name}.csv'
+        if p.exists():
+            with open(p, newline='') as f:
+                rows += [dict(r, source=name) for r in csv.DictReader(f)]
+    return rows
 
 
 def make_handler(hub, runner):
@@ -432,15 +452,23 @@ def make_handler(hub, runner):
                 elif u.path == '/history':
                     self._json(list(runner.results))
                 elif u.path == '/results':
-                    self._json(phase0_rows())
+                    self._json(saved_rows())
                 else:
                     self._json({'error': 'not found'}, 404)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
+            except ValueError as e:
+                self._json({'error': f'bad request: {e}'}, 400)
+            except Exception as e:  # keep the page informed instead of dropping the connection
+                self._json({'error': f'{type(e).__name__}: {e}'}, 500)
 
         def do_POST(self):
             q = parse_qs(urlparse(self.path).query)
-            rate = float(q['rate'][0]) if 'rate' in q else None
+            try:
+                rate = float(q['rate'][0]) if 'rate' in q else None
+            except ValueError:
+                self._json({'error': 'bad rate'}, 400)
+                return
             self._json(runner.control(q.get('cmd', [None])[0], rate))
 
         def _events(self):
@@ -527,8 +555,8 @@ def main():
             args.model = board_model
         elif args.model and board_model and board_model != args.model:
             sys.exit(f'the board runs {board_model} but --model is {args.model}: flash the right build or drop --model')
-    if args.target == 'host' and args.model is None:  # ref_host_<model>.exe
-        stem_model = Path(args.exe).stem.rsplit('_', 1)[-1]
+    if args.target == 'host' and args.model is None:  # ref_host_<model>[.exe], e.g. ref_host_int8_80.exe
+        stem_model = Path(args.exe).stem.removeprefix('ref_host_')
         args.model = stem_model if stem_model in CONFIGS else None
     args.model = args.model or 'tern80'
 

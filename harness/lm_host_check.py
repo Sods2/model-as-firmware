@@ -1,13 +1,16 @@
 """Build the MafLM runtime for the PC and compare its logits with the integer reference (train/lm/intref.py).
 
-    train/.venv/Scripts/python.exe harness/lm_host_check.py --name check_tree --npz train/runs/check_tree.npz
+    python harness/lm_host_check.py --name lm_tree --npz train/runs/lm_tree.npz
 
-Uses the 32-bit MinGW gcc at C:/MinGW/bin/gcc.exe (plain C, no DSP intrinsics: SMLAD is emulated in C).
+Compiles with the PC's C compiler: $HOST_CC, else C:/MinGW/bin/gcc.exe if it exists (what was used), else gcc on
+PATH. Plain C, no DSP intrinsics: SMLAD is emulated in C.
 Sequences are slices of TinyStories V2-valid, each run from a fresh KV cache.
 """
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,7 +24,8 @@ sys.path.insert(0, str(ROOT / "train/lm"))
 from intref import IntLM, load_npz  # noqa: E402
 
 FW = ROOT / "firmware/rp2350/maflm"
-GCC = "C:/MinGW/bin/gcc.exe"
+GCC = (os.environ.get("HOST_CC") or ("C:/MinGW/bin/gcc.exe" if Path("C:/MinGW/bin/gcc.exe").exists() else None)
+       or shutil.which("gcc") or "gcc")
 
 
 def main() -> None:
@@ -33,7 +37,11 @@ def main() -> None:
     ap.add_argument("--dual", action="store_true", help="compile the two-core partitioning (run on one core)")
     a = ap.parse_args()
 
-    tmp = Path(tempfile.mkdtemp())
+    with tempfile.TemporaryDirectory() as td:
+        sys.exit(check(a, Path(td)))
+
+
+def check(a, tmp: Path) -> int:
     exe = tmp / "host_main.exe"
     cmd = [GCC, "-O2", "-std=c11", f'-DLM_GEN_HEADER="maflm_{a.name}.h"', f"-DLM_DUAL={int(a.dual)}", f"-I{FW}", f"-I{FW / 'gen'}",
            str(FW / "host_main.c"), str(FW / "lm_rt.c"), str(FW / "gen" / f"maflm_{a.name}.c"), "-o", str(exe)]
@@ -53,7 +61,7 @@ def main() -> None:
         msg = "" if same else f", first difference at position {int(np.argmax((c_logits != ref).any(1)))}"
         print(f"sequence {s}: {len(ids)} positions, logits identical: {same}{msg}")
     print("PC build bit-exact" if ok else "MISMATCH")
-    sys.exit(0 if ok else 1)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

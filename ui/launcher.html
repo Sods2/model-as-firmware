@@ -46,7 +46,7 @@ input[type=search] { flex: 1 1 240px; min-width: 0; }
 .btn:disabled { opacity: .45; cursor: default; }
 .builds { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
 .grp { font-size: 12px; color: var(--muted); font-family: var(--mono); letter-spacing: .06em; margin-top: 8px; }
-.build { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; text-align: left; cursor: pointer; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text); font: inherit; min-height: 44px; }
+.build { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; text-align: left; cursor: pointer; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text); font: inherit; min-height: 44px; flex-shrink: 0; }
 .build[aria-pressed="true"] { border-color: var(--ok); background: #13201C; }
 .build:disabled { opacity: .5; cursor: default; }
 .build .nm { font-family: var(--mono); font-size: 13px; word-break: break-all; }
@@ -58,6 +58,12 @@ input[type=search] { flex: 1 1 240px; min-width: 0; }
 .run.error { border: 2px solid #FF5C5C; background: var(--bad-bg); }
 .run .t { font-weight: 700; }
 pre.log { margin: 0; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); background: var(--bg); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; }
+.help { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-size: 13px; color: var(--text2); }
+.help summary { cursor: pointer; font-weight: 600; color: var(--text); min-height: 24px; }
+.help ul { margin: 10px 0 4px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; max-width: 110ch; }
+.help b { color: var(--text); font-weight: 600; }
+.help code, .note code { font-family: var(--mono); font-size: 12px; }
+.need { color: var(--warn); }
 .hidden { display: none !important; }
 </style>
 </head>
@@ -75,6 +81,18 @@ pre.log { margin: 0; max-height: 220px; overflow: auto; font-family: var(--mono)
   </div>
 </header>
 
+<details class="help">
+  <summary>What is this?</summary>
+  <ul>
+    <li>This page starts a <b>live view</b> of a model running, and checks every result as it goes. Pick a test, where it runs and which model or build, then press Start.</li>
+    <li><b>Golden model</b>: an independent Python copy of the exact integer arithmetic the firmware does. Every build has to match it bit for bit; it needs no hardware.</li>
+    <li><b>PC build</b>: the same plain-C code that runs on the board, compiled for this computer. <b>Pico 2 board</b>: the real firmware, with cycle counts (the times that the results quote).</li>
+    <li><b>Phase 1</b> is the MNIST digit model and its compiler; <b>Phase 3</b> is the tiny story model. "Gate 1" was the goal of beating CMSIS-NN, Arm's standard library, on speed.</li>
+    <li>Flashing goes over <b>SWD</b> (the debug wires of a Raspberry Pi Debug Probe), with picotool over USB as the fallback. Nothing is compiled here: builds come from <code>harness/measure.sh</code> or CMake.</li>
+  </ul>
+  <p class="note">Setup: <code>docs/SETUP.md</code>. Building and measuring: <code>docs/REPRODUCE.md</code>. The pages, panel by panel: <code>docs/UI-GUIDE.md</code>.</p>
+</details>
+
 <section id="run" class="run hidden" role="status" aria-live="polite">
   <div class="row" style="justify-content:space-between">
     <span><span class="t" id="runState"></span> <span id="runLabel" class="note"></span></span>
@@ -90,7 +108,7 @@ pre.log { margin: 0; max-height: 220px; overflow: auto; font-family: var(--mono)
 <section class="panel" aria-labelledby="s1">
   <div class="step"><span class="n">1</span><h2 id="s1">What to test</h2></div>
   <div class="cards" id="tests">
-    <button type="button" class="card" data-test="mnist" aria-pressed="false"><b>Digit recognition (MNIST)</b><span>Phase 1. 10,000 test images through the CNN: feature maps, ternary weights, per-stage time, checked against the golden model.</span></button>
+    <button type="button" class="card" data-test="mnist" aria-pressed="false"><b>Digit recognition (MNIST)</b><span>Phase 1. 10,000 handwritten digits through a small CNN: feature maps, weights, time per layer, every result checked against the golden model.</span></button>
     <button type="button" class="card" data-test="story" aria-pressed="false"><b>Tiny story (MafLM)</b><span>Phase 3. Type a prompt and watch the model write byte by byte: time per byte, top candidates, tree leaves, checked against the golden model.</span></button>
   </div>
 </section>
@@ -98,7 +116,7 @@ pre.log { margin: 0; max-height: 220px; overflow: auto; font-family: var(--mono)
 <section class="panel" aria-labelledby="s2">
   <div class="step"><span class="n">2</span><h2 id="s2">Where it runs</h2></div>
   <div class="cards" id="targets">
-    <button type="button" class="card" data-target="golden" aria-pressed="false"><b>Golden model</b><span>No hardware. The integer reference in Python on this PC. No timing.</span></button>
+    <button type="button" class="card" data-target="golden" aria-pressed="false"><b>Golden model</b><span>No hardware. A Python copy of the exact integer arithmetic, the reference every build must match. No timing.</span></button>
     <button type="button" class="card" data-target="host" aria-pressed="false"><b>PC build</b><span>The plain-C reference compiled for this PC (MNIST only). No timing.</span></button>
     <button type="button" class="card" data-target="pico" aria-pressed="false"><b>Pico 2 board</b><span>The firmware on the board, with cycle counts. Keep the current build or flash another one.</span></button>
   </div>
@@ -118,7 +136,23 @@ pre.log { margin: 0; max-height: 220px; overflow: auto; font-family: var(--mono)
 
 <script>
 'use strict';
-const S = { opt: null, test: null, target: null, choice: {}, filter: '', status: null };
+const S = { opt: null, test: null, target: null, choice: {}, filter: '', status: null, blocker: '' };
+const TAG_HELP = {
+  SRAM: 'code and weights copied to on-chip SRAM at boot', flash: 'code and weights run from external flash (XIP, through a 16 KB cache)',
+  'one core': 'runs on one Cortex-M33 core', 'two cores': 'work split across both Cortex-M33 cores', SMLAD: 'uses the DSP instruction that does two 16-bit multiply-adds at once',
+  profiling: 'per-stage cycle counters compiled in (a few % slower); shows time per layer', 'fc1 as s4': 'CMSIS-NN with FC1 stored as 4-bit weights',
+  code: 'weights compiled into instructions', dense: 'weights stored as plain arrays (unpacked)', sparse: 'only the non-zero weights stored', base3: 'ternary weights packed 5 per byte',
+  i4code: 'FC2/FC3 4-bit weights compiled into instructions', i4dense: 'FC2/FC3 4-bit weights as plain arrays', cvcode: 'conv weights compiled into instructions',
+  stream: 'dense layers streamed from flash with DMA', fpool: 'each conv fused with the max-pool after it', fpoolrp: 'fused conv + pool, conv1 computes two output rows per step',
+  i8code: 'int8 layers compiled into instructions', i8dense: 'int8 layers as plain arrays', tree: 'tree (fast feedforward) twin: reads one leaf per layer',
+  '2k-step check model': 'a short 2,000-step training run used to check the pipeline, not a result'
+};
+function tagHelp(t) { return S.test === 'story' && t === 'dense' ? 'dense twin: an ordinary feedforward layer that reads all its weights' : (TAG_HELP[t] || ''); }
+const NEED = {   // what a missing piece blocks, and where the guide is
+  mnist: 'The MNIST test images are not in train/BitNetMCU/data. Download them once: docs/SETUP.md, "MNIST test images".',
+  story: 'No trained story model in train/runs. Train one (about 6.5 h on a GPU): docs/REPRODUCE.md, "MafLM".',
+  host: 'No PC build in firmware/baselines/ref_c/build-host. Build it: docs/REPRODUCE.md, "No hardware".',
+};
 const $ = id => document.getElementById(id);
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -154,9 +188,16 @@ function pick(group, attr, value) {
   renderDetail();
 }
 
+function needNote(text) { return el('p', { class: 'note need' }, text); }
+
 function renderDetail() {
   const box = $('detail'), o = S.opt;
+  S.blocker = '';
   if (!o || !S.test || !S.target) { box.replaceChildren(el('p', { class: 'note' }, 'Choose a test and where it runs.')); return updateStart(); }
+  if (S.test === 'mnist' && !o.mnist_data) S.blocker = NEED.mnist;
+  else if (S.test === 'story' && S.target === 'golden' && !o.story_npz.length) S.blocker = NEED.story;
+  else if (S.target === 'host' && !o.host_exes.length) S.blocker = NEED.host;
+  if (S.blocker) { box.replaceChildren(needNote(S.blocker)); return updateStart(); }
   if (S.target === 'golden') {
     const list = S.test === 'mnist' ? o.mnist_models : o.story_npz;
     const key = S.test === 'mnist' ? 'model' : 'npz';
@@ -164,14 +205,15 @@ function renderDetail() {
     const sel = el('select', { onchange: e => { S.choice[key] = e.target.value; updateStart(); } },
       ...list.map(m => { const op = el('option', { value: m }, m); if (m === S.choice[key]) op.selected = true; return op; }));
     box.replaceChildren(el('div', { class: 'row' }, el('label', { class: 'inline' }, S.test === 'mnist' ? 'Model' : 'Integer model (train/runs)', sel)),
-      el('p', { class: 'note' }, S.test === 'mnist' ? 'tern80 is the Gate 1 model; z70/z90 have 70% and 90% of fc1 forced to zero; int8_80 has int8 linear layers.'
-        : 'lm_tree and lm_dense are the trained twins; check_* are the 2,000-step check models.'));
+      el('p', { class: 'note' }, S.test === 'mnist' ? 'tern80 is the main model (ternary FC1); z70/z90 have 70% and 90% of FC1\'s weights forced to zero; int8_80 has int8 linear layers.'
+        : 'lm_tree and lm_dense are the trained twins (tree and plain feedforward layers); check_* are short 2,000-step check models.'),
+      S.test === 'mnist' && !o.bitnet ? el('p', { class: 'note' }, 'The BitNetMCU clone is not in train/, so the PyTorch agreement check will be skipped (docs/SETUP.md).') : null);
   } else if (S.target === 'host') {
     if (!S.choice.exe) S.choice.exe = o.host_exes.find(x => x.includes('tern80.')) || o.host_exes[0];
     const sel = el('select', { onchange: e => { S.choice.exe = e.target.value; updateStart(); } },
       ...o.host_exes.map(m => { const op = el('option', { value: m }, m); if (m === S.choice.exe) op.selected = true; return op; }));
-    box.replaceChildren(o.host_exes.length ? el('div', { class: 'row' }, el('label', { class: 'inline' }, 'PC build', sel))
-      : el('p', { class: 'note' }, 'No PC builds in firmware/baselines/ref_c/build-host. Build them first (harness/README.md).'));
+    box.replaceChildren(el('div', { class: 'row' }, el('label', { class: 'inline' }, 'PC build', sel)),
+      el('p', { class: 'note' }, 'The plain-C reference for each model, from firmware/baselines/ref_c/build-host.'));
   } else {
     const info = o.board.info, onBoard = info && info.test === S.test;
     if (S.choice.build === undefined) S.choice.build = onBoard ? '' : null;
@@ -183,9 +225,9 @@ function renderDetail() {
     const search = el('input', { type: 'search', placeholder: 'Filter builds, e.g. ram dual tree', value: S.filter, 'aria-label': 'Filter builds',
       oninput: e => { S.filter = e.target.value; renderBuilds(); } });
     box.replaceChildren(keep, el('div', { class: 'row', style: 'margin-top:12px' }, search),
-      el('p', { class: 'note' }, 'Or flash one of the existing builds first (over SWD; takes about 10 s). Nothing is compiled here.'),
+      el('p', { class: 'note' }, 'Or flash one of the existing builds first (over SWD with the Debug Probe, or picotool over USB; about 10 s). Nothing is compiled here. Hover a tag to see what it means.'),
       el('div', { class: 'builds', id: 'builds' }));
-    if (!o.flash_tool) box.append(el('p', { class: 'note', style: 'color:var(--warn)' }, 'Git Bash not found, so flashing is unavailable; keep the current build.'));
+    if (!o.flash_tool) box.append(needNote('bash not found (Git Bash on Windows), so flashing is unavailable; keep the current build.'));
     renderBuilds();
   }
   updateStart();
@@ -207,14 +249,16 @@ function renderBuilds() {
     kids.push(el('button', { type: 'button', class: 'build', 'aria-pressed': String(S.choice.build === b.path), disabled: !!b.unsupported || !S.opt.flash_tool,
       title: b.unsupported || b.path, onclick: () => { S.choice.build = b.path; renderDetail(); } },
       el('span', { class: 'nm' }, b.name),
-      el('span', { class: 'tags' }, ...b.tags.map(t => el('span', { class: 'tag' }, t)),
+      el('span', { class: 'tags' }, ...b.tags.map(t => el('span', { class: 'tag', title: tagHelp(t) }, t)),
         b.unsupported ? el('span', { class: 'tag', style: 'color:var(--warn)' }, 'not in the live view yet') : null)));
   }
-  box.replaceChildren(...(kids.length ? kids : [el('p', { class: 'note' }, 'No builds match.')]));
+  const any = S.opt.builds.some(b => b.test === S.test);
+  box.replaceChildren(...(kids.length ? kids : [el('p', { class: 'note' }, any ? 'No builds match the filter.'
+    : 'No builds yet: nothing to flash. Build some first (docs/REPRODUCE.md), or keep what is on the board.')]));
 }
 
 function updateStart() {
-  let ok = !!(S.test && S.target), note = '';
+  let ok = !!(S.test && S.target && !S.blocker), note = S.blocker ? 'Missing files: see the note above.' : '';
   if (ok && S.target === 'pico') { ok = S.choice.build != null; if (!ok) note = 'Pick a build, or keep the one on the board.'; }
   if (ok && S.target === 'host') ok = !!S.choice.exe;
   const busy = S.status && ['stopping', 'flashing', 'starting'].includes(S.status.state);
@@ -227,7 +271,7 @@ function updateStart() {
 async function start() {
   const body = { test: S.test, target: S.target, ...S.choice };
   const r = await postJSON('/api/start', body);
-  if (r.error) $('startNote').textContent = r.error;
+  if (r.error) { $('startNote').textContent = r.error; S.awaiting = false; }
   poll();
 }
 
@@ -246,7 +290,7 @@ async function poll() {
   $('bStop').classList.toggle('hidden', !st.running && !['flashing', 'starting'].includes(st.state));
   const log = st.log.join('\n');
   if (log !== lastLog) { lastLog = log; $('log').textContent = log; $('log').scrollTop = 1e9; }
-  if (st.state === 'error') $('logBox').open = true;
+  if (st.state === 'error') { $('logBox').open = true; S.awaiting = false; }
   if (st.state === 'running' && S.awaiting) { S.awaiting = false; location.href = st.url; }
   updateStart();
 }

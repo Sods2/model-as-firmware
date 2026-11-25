@@ -3,9 +3,8 @@
 Started by harness/bridge.py, which switches to this mode by itself when the board reports a story build (its INFO line
 has window=), or with --task story:
 
-  PY=train/.venv/Scripts/python.exe
-  $PY harness/bridge.py --task story --target golden --npz train/runs/lm_tree.npz   # no hardware
-  $PY harness/bridge.py --target pico --port COM3                                  # model npz from the board's INFO
+  python harness/bridge.py --task story --target golden --npz train/runs/lm_tree.npz   # no hardware
+  python harness/bridge.py --target pico --port COM3        # /dev/ttyACM0 on Linux; model npz from the board's INFO
 
 Each position is one byte. The board runs it ('S' command: argmax, cycles, logits checksum, XIP counters) and the golden
 model (train/lm/intref_step.py, StepLM, the token-by-token integer reference) runs the same byte. A position counts as
@@ -163,15 +162,23 @@ class PicoTarget:
 
     def step(self, tok):
         self._write(b'S' + bytes([tok]))
-        _, am, cyc, cs, acc, hit = self._line().split()
-        return int(am), int(cyc), int(cs, 16), int(acc), int(hit)
+        ln = self._line()
+        try:
+            _, am, cyc, cs, acc, hit = ln.split()
+            return int(am), int(cyc), int(cs, 16), int(acc), int(hit)
+        except ValueError:
+            raise TargetLost(f'unexpected reply from the board: {ln[:60]!r}') from None
 
     def stage_cycles(self):
         """Cycles per stage for the last step (Q is cumulative since 'R'), or None on builds without LM_PROFILE."""
         if not self.want_stages:
             return None
         self._write(b'Q')
-        q = [int(v) for v in self._line().split()[1:]]
+        ln = self._line()
+        try:
+            q = [int(v) for v in ln.split()[1:]]
+        except ValueError:
+            raise TargetLost(f'unexpected reply from the board: {ln[:60]!r}') from None
         if not any(q):
             self.want_stages = False
             return None
@@ -297,10 +304,16 @@ class Runner(threading.Thread):
                     self.cv.wait()
                 req, self.request, self.stop_req = self.request, None, False
             try:
+                if not self.connected:               # after an error: reconnect on the next Generate
+                    self.target.close()
+                    self.meta.update(self.target.open())
+                    self.connected = True
                 self._generate(*req)
             except TargetLost as e:
-                self.status('disconnected', str(e))
-                return
+                self.connected = False
+                self.status('disconnected', f'{e}. Press Generate to reconnect and try again.')
+            except Exception as e:  # keep the page usable: report it, wait for the next Generate
+                self.status('disconnected', f'{type(e).__name__}: {e}. Press Generate to try again.')
 
     def _wait_turn(self):
         with self.cv:
@@ -448,7 +461,11 @@ def make_handler(hub, runner):
                     return
                 self._json(runner.generate(prompt, n, min(max(temp, 0.0), 2.0), seed))
             else:
-                rate = float(q['rate'][0]) if 'rate' in q else None
+                try:
+                    rate = float(q['rate'][0]) if 'rate' in q else None
+                except ValueError:
+                    self._json({'error': 'bad rate'}, 400)
+                    return
                 self._json(runner.control(q.get('cmd', [None])[0], rate))
 
         def _events(self):
@@ -477,7 +494,7 @@ def serve(args, meta):
     """Called by bridge.py. args: target, port, force, npz, rate, prompt, stop_on_mismatch, http_port."""
     npz = Path(args.npz)
     if not npz.exists():
-        sys.exit(f'{npz} not found: train the model (train/lm/overnight.sh) or pass --npz')
+        sys.exit(f'{npz} not found: train the model (docs/REPRODUCE.md, "MafLM"; train/lm/overnight.sh) or pass --npz')
     print(f'golden model {npz} ...')
     golden = Golden(npz)
     if args.target == 'golden':

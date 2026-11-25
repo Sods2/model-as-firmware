@@ -10,13 +10,15 @@ Every target is checked against:
   - the PyTorch model the weights came from: prediction agreement, in %
   - the true labels: accuracy, in %
 
-Usage (from the repo root):
-  train/.venv/Scripts/python.exe harness/run.py --model tern80 --target pico --port COM3 --elf <ref_c.elf>
+Usage (from the repo root, with the venv's python; see docs/SETUP.md):
+  python harness/run.py --model tern80 --target golden --csv scratch.csv
+  python harness/run.py --model tern80 --target pico --port COM3 --elf <ref_c.elf>     # /dev/ttyACM0 on Linux
 """
 import argparse
 import csv
 import datetime as dt
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,7 +35,21 @@ from golden import Golden, GoldenFFF, GoldenS8  # noqa: E402
 CONFIGS = {'tern80': 'ternary_cnn80.yaml', 'tern80z70': 'ternary_cnn80_z70.yaml', 'tern80z90': 'ternary_cnn80_z90.yaml',
            'int8_80': 'int8_cnn80.yaml', 'fff80': 'fff_cnn80.yaml'}
 FFF_MODELS = {'fff80'}   # idea B: tree models, exported to train/export/<model>.npz by train/export_fff.py
-SIZE_TOOL = Path.home() / '.pico-sdk/toolchain/15_2_Rel1/bin/arm-none-eabi-size.exe'
+
+
+def find_tool(name, env):
+    """A toolchain program: $<env>, else the Pico VS Code extension's GCC 15.2.Rel1 (the version the results were
+    measured with), else PATH. None if it isn't anywhere."""
+    if os.environ.get(env):
+        return os.environ[env]
+    sdk = Path(os.environ.get('PICO_SDK_HOME', Path.home() / '.pico-sdk')) / 'toolchain/15_2_Rel1/bin'
+    for c in (sdk / f'{name}.exe', sdk / name):
+        if c.exists():
+            return str(c)
+    return shutil.which(name)
+
+
+SIZE_TOOL = find_tool('arm-none-eabi-size', 'ARM_SIZE')
 SUMMARY_COLS = ['date', 'build', 'model', 'target', 'n_images', 'accuracy_pct', 'golden_match_pct',
                 'pytorch_agree_pct', 'latency_ms_mean', 'cycles_mean', 'cycles_min', 'cycles_max', 'sys_mhz',
                 'flash_kb', 'ram_kb', 'flash_read_kb', 'energy_mj', 'notes']
@@ -45,7 +61,11 @@ def load_mnist(n, train=False):
     from torchvision import datasets, transforms
     tf = transforms.Compose([transforms.Resize((16, 16)), transforms.ToTensor(),
                              transforms.Normalize((0.1307,), (0.3081,))])
-    ds = datasets.MNIST(root=str(BITNET / 'data'), train=train, transform=tf, download=False)
+    try:
+        ds = datasets.MNIST(root=str(BITNET / 'data'), train=train, transform=tf, download=False)
+    except RuntimeError as e:
+        raise SystemExit(f'MNIST not found in {BITNET / "data"}. Download it once with the command in '
+                         f'docs/SETUP.md ("MNIST test images"). ({e})') from None
     x = torch.stack([ds[i][0] for i in range(n)])
     y = np.array([ds[i][1] for i in range(n)])
     flat = x.view(n, -1).numpy()
@@ -55,7 +75,11 @@ def load_mnist(n, train=False):
 
 
 def pytorch_preds(model_name, x):
-    """Predictions of the trained (quantization-aware) PyTorch model on the float inputs."""
+    """Predictions of the trained (quantization-aware) PyTorch model on the float inputs. None when the BitNetMCU
+    clone (which defines the model classes) isn't there: the PyTorch agreement check is then skipped."""
+    if not (BITNET / 'exportquant.py').exists():
+        print(f'note: {BITNET} not found, so the PyTorch agreement check is skipped (docs/SETUP.md, "BitNetMCU")')
+        return None
     import torch
     import yaml
     cwd = os.getcwd()
@@ -197,7 +221,7 @@ def main():
         'build': args.build, 'model': args.model, 'target': args.target, 'n_images': args.n,
         'accuracy_pct': round(acc, 2),
         'golden_match_pct': round(match.mean() * 100, 2),
-        'pytorch_agree_pct': round((pred == t_pred).mean() * 100, 2),
+        'pytorch_agree_pct': round((pred == t_pred).mean() * 100, 2) if t_pred is not None else '',
         'latency_ms_mean': round(cycles.mean() / sys_hz * 1e3, 3) if sys_hz else '',
         'cycles_mean': int(cycles.mean()) if sys_hz else '',
         'cycles_min': int(cycles.min()) if sys_hz else '',
@@ -206,8 +230,10 @@ def main():
         'flash_kb': '', 'ram_kb': '', 'flash_read_kb': '', 'energy_mj': '',
         'notes': args.notes,
     }
-    if args.elf:
+    if args.elf and SIZE_TOOL:
         summary['flash_kb'], summary['ram_kb'] = elf_sizes(args.elf, in_ram='_ram' in args.build)
+    elif args.elf:
+        print('note: arm-none-eabi-size not found (set ARM_SIZE), so flash/RAM sizes are left empty')
     xip = meta.get('xip')
     if xip and xip[0]:
         # flash_read_kb: XIP cache misses x 8-byte lines, per inference (FINDINGS F22). Uncached XIP accesses
@@ -216,15 +242,16 @@ def main():
         summary['flash_read_kb'] = round((x_acc - x_hit) * XIP_LINE / n_img / 1024, 2)
 
     print(f'model {args.model}, target {args.target}, {args.n} images')
-    print(f'  accuracy           {acc:.2f} %   (PyTorch model: {(t_pred == y).mean() * 100:.2f} %)')
+    torch_acc = f'   (PyTorch model: {(t_pred == y).mean() * 100:.2f} %)' if t_pred is not None else ''
+    print(f'  accuracy           {acc:.2f} %{torch_acc}')
     print(f'  logits == golden   {match.sum()}/{args.n}')
-    print(f'  agrees w/ PyTorch  {summary["pytorch_agree_pct"]} %')
+    print(f'  agrees w/ PyTorch  ' + (f'{summary["pytorch_agree_pct"]} %' if t_pred is not None else 'n/a (BitNetMCU not cloned)'))
     if hasattr(golden, 'max_abs_bound'):
         print(f'  int32 headroom     max |partial sum| bound = {golden.max_abs_bound} ({golden.max_abs_bound / 2**31 * 100:.2f} % of int32)')
     if sys_hz:
         print(f'  cycles             mean {summary["cycles_mean"]}, min {summary["cycles_min"]}, max {summary["cycles_max"]}'
               f'  ->  {summary["latency_ms_mean"]} ms at {summary["sys_mhz"]} MHz')
-    if args.elf:
+    if args.elf and SIZE_TOOL:
         print(f'  flash {summary["flash_kb"]} KB, RAM {summary["ram_kb"]} KB')
     if xip and xip[0]:
         n_img, x_acc, x_hit = xip

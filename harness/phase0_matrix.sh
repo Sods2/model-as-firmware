@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Build, flash and measure every Phase 0 configuration on the Pico 2 (Git Bash, from the repo root).
+# Build, flash and measure every Phase 0 configuration on the Pico 2 (bash; Git Bash on Windows).
 #
 #   harness/phase0_matrix.sh profile   # 200 images per build, stage profiling on  -> results/profile.csv (+ _stages.csv)
 #   harness/phase0_matrix.sh final     # 10k images per build, profiling off       -> results/phase0.csv
 #
+#   CSV=scratch.csv harness/phase0_matrix.sh final    # write somewhere else instead of the committed results
+#
 # Builds land in firmware/baselines/<build>/build-<model>-<flash|ram>[-prof]/.
 set -euo pipefail
 MODE=${1:-final}
-PORT=${PORT:-COM3}
-P=~/.pico-sdk
-export PATH="$P/cmake/v4.3.4/bin:$P/ninja/v1.13.2:$P/toolchain/15_2_Rel1/bin:$PATH"
-PY=train/.venv/Scripts/python.exe
+cd "$(dirname "$0")/.."
+. harness/env.sh     # PY, PORT and the toolchain on PATH; override any of them in the environment
 
-if [ "$MODE" = profile ]; then N=200; PROF=ON; CSV=results/profile.csv; SUFFIX=-prof
-else N=10000; PROF=OFF; CSV=results/phase0.csv; SUFFIX=; fi
+if [ "$MODE" = profile ]; then N=200; PROF=ON; CSV=${CSV:-results/profile.csv}; SUFFIX=-prof
+else N=10000; PROF=OFF; CSV=${CSV:-results/phase0.csv}; SUFFIX=; fi
 
 . harness/flash.sh   # flash(): SWD via the Debug Probe, picotool fallback (FLASH=auto|swd|usb)
 

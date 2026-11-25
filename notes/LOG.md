@@ -133,13 +133,12 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
 - No branch or IT block left in any conv loop. Stage cycles (SRAM, one core): SMLAD conv1 −14%, dw1 −15%; v0 dw1 −20% (most of the old F6 regression).
 - Whole model: v1 + SMLAD on two cores, SRAM **4.36 → 4.23 ms (3.44x faster than CMSIS-NN)**; v0 8.83 → 8.18 ms. FINDINGS F14.
 - `measure.sh` takes `NOTES="..."` for the CSV notes column; the new rows are labelled `branch-free ReLU`.
-- Gotcha: `run.py --target host` logs to `results/phase0.csv` by default. My 12 host checks appended rows there (mislabelled `ref_c`); the file was restored with `git checkout`.
+- Gotcha: `run.py --target host` logs to `results/phase0.csv` by default. Host checks run without `--csv` append rows there (labelled `ref_c`), so pass `--csv` for checks.
 
 ## 11 Nov 2026 (later): why conv1 got slower with SMLAD
 
 - Disassembled conv1 in mafc_v0 and mafc_v0_simd (RAM profile ELFs). The int16 store makes gcc compile the 2nd ReLU of each unrolled pair as a branch, and rotates the loop (2 to 3 taken branches per pair instead of 1). 49% of conv1 sums are negative. Measured 59.5 → 66.6 cycles per pair.
 - Standalone compile check: clamp-then-shift or a `bic … asr #31` mask gives branch-free code, shorter than v0's. Not yet timed on the board. Details: compiler.md and FINDINGS F13.
-- Also found that the watcher loop from the SMLAD run never ended: its own command line contained `harness/run.py`. Gotcha added to pico-toolchain.md.
 
 ## 11 Nov 2026: compiler v1 step 2, SMLAD on the depthwise convs
 
@@ -147,7 +146,7 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
 - `compile.py --simd`: int16 planes where proven, and an SMLAD kernel (2 outputs per step, weights pre-packed) for depthwise convs with int16 input, so dw1 and dw2. Builds `mafc_s` / `mafc2_s` in `measure.sh`. Earlier generated files are byte-identical. Bit-exact on the PC and the board, 10k images, all three models on the PC and tern80 on the board.
 - Timed (tern80): one core 8.93 ms (flash) / 8.29 ms (SRAM); two cores 5.54 ms (flash) / **4.36 ms (SRAM)**. That's 1.10x over v1 on two cores from SRAM, and **3.33x faster than CMSIS-NN**.
 - Profile: dw1 −29%, dw2 −35%, conv1 +12% (int16 store; gcc code generation). conv1 is next (SXTB16 + SMLAD).
-- Process note: a `measure.sh` started with `&` kept running unseen and held COM3 while a second run started. Recorded in pico-toolchain.md; the orphan's results were valid and are the ones logged.
+- Process note: a `measure.sh` running in the background held the board while a second run started (see "only one program can use the board" in pico-toolchain.md). The first run's results were valid and are the ones logged.
 
 ## 11 Nov 2026: do the two cores slow each other down? (IDEAS U3, test 1)
 
@@ -196,7 +195,7 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
 
 **Step 6: harness** (`harness/run.py`, `harness/phase0_matrix.sh`)
 - USB-serial protocol: `?` info, `I`+256 bytes runs one image and returns pred, cycles and logits, `T` returns stage cycles. A 10k run takes about 3 minutes.
-- Logs one row per run to `results/phase0.csv` with the HANDOFF §6 columns. Energy and flash bytes read stay blank for now.
+- Logs one row per run to `results/phase0.csv` with the plan's metric columns (docs/history/plan.md §6). Energy and flash bytes read stay blank for now.
 
 **Step 5: CMSIS-NN int8 baseline** (`firmware/baselines/cmsis_nn/`)
 - Found that the network has no biases and only ReLU/max-pool, so it's positively homogeneous. That means a static-scale int8 build can use the very same integer weights, and it's the same network.
@@ -270,7 +269,7 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
   - Gates: 0 met except energy; 1 met with a stated scope; 2 partly (idea D and PIO not tried); 3 met, not like for like.
   - Idea B on the story model meets its 3x target for the tree layers (7.8x fewer FFN weights read, FFN 5.4x faster). Over the whole token it reads 2.7x fewer flash bytes (82 vs 223 KB).
   - New number: 40% of the story model's 0.89M ternary weights are zero (dense 39.8%, tree 40.8%, from `train/runs/lm_*.npz`). All of its ~530K non-zero weights as code would take about 3 MB, six times the SRAM. The story model keeps its weights as data by design; code for its small matrices was not tried.
-  - Phase 4 is the user's decision. Recommended first: energy with an INA226, then optionally a model larger than SRAM on the Pico 2 (ideas C and G).
+  - Phase 4 is an open decision. Recommended first: energy with an INA226, then optionally a model larger than SRAM on the Pico 2 (ideas C and G).
 
 ## 25 Nov 2026: best-of build (F28)
 

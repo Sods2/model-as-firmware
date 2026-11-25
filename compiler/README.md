@@ -21,9 +21,9 @@ train/export/<model>.h ──front end──► IR (integer ops + integer weight
 ## Use
 
 ```bash
-train/.venv/Scripts/python.exe compiler/compile.py --model tern80     # -> firmware/rp2350/mafc/gen/mafc_tern80.c (+ .ir.json)
+python compiler/compile.py --model tern80     # -> firmware/rp2350/mafc/gen/mafc_tern80.c (+ .ir.json)
 harness/measure.sh final results/phase1.csv mafc:tern80:flash mafc:tern80:ram
-train/.venv/Scripts/python.exe compiler/compile.py --model tern80 --cores 2 --simd --ternary code --int4 dense --fuse-pool --row-pairs   # current best (F28)
+python compiler/compile.py --model tern80 --cores 2 --simd --ternary code --int4 dense --fuse-pool --row-pairs   # current best (F28)
 harness/measure.sh final results/phase1.csv mafc2_s:tern80:ram:code:dense:data:nostream:plain:fpoolrp
 ```
 

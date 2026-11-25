@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Overnight run (Git Bash, from anywhere): train both MafLM twins on Atome's token budget, then for each one check
+# Overnight run (bash, from anywhere; Git Bash on Windows): train both MafLM twins on Atome's token budget, then for each one check
 # the integer reference against PyTorch, export it, generate the firmware data and check the PC build bit-exact.
 #
 #   bash train/lm/overnight.sh                 # 61,000 steps x 32K tokens = 2.0B tokens each, ~6.5 h for both
@@ -8,10 +8,10 @@
 #
 # Everything goes to train/runs/: lm_<twin>{,_<TAG>}.pt/.json/.npz/.log, and overnight{,_<TAG>}.txt as the summary.
 # The firmware data goes to firmware/rp2350/maflm/gen/maflm_lm_<twin>{_<TAG>}.c/.h. A failure in one twin doesn't stop
-# the other. Tomorrow: flash and measure with harness/lm_run.py (notes/lm.md).
+# the other. Then build, flash and measure on the board with harness/lm_run.py (docs/REPRODUCE.md).
 set -u
 cd "$(dirname "$0")/../.."
-PY=train/.venv/Scripts/python.exe
+. harness/env.sh     # PY (override in the environment)
 STEPS=${STEPS:-61000}
 EVAL=${EVAL:-2000}
 TAG=${TAG:-}

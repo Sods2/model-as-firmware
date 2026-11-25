@@ -1,7 +1,7 @@
 # MafLM (Phase 3 tiny story model) on the Pico 2: the integer LM runtime (lm_rt.c) with compiler-generated model
 # data (gen/maflm_<MODEL>.c, from compiler/compile_lm.py) and the serial harness (pico_main.c).
 #
-#   -DMODEL=check_tree        gen/maflm_<MODEL>.{c,h}
+#   -DMODEL=lm_tree           gen/maflm_<MODEL>.{c,h}
 #   -DRUN_FROM_RAM=ON         copy everything (code + weights) to SRAM at boot; otherwise weights stay in flash
 #   -DLM_PROFILE=ON           per-stage cycle counters ('Q' command)
 #   -DDUAL_CORE=ON            split matvec rows, table builds and attention heads across both cores
@@ -27,7 +27,7 @@ if (EXISTS ${picoVscode})
 endif()
 # ====================================================================================
 set(PICO_BOARD pico2 CACHE STRING "Board type")
-set(MODEL check_tree CACHE STRING "Model (gen/maflm_<MODEL>.c)")
+set(MODEL lm_tree CACHE STRING "Model (gen/maflm_<MODEL>.c)")
 
 include(${CMAKE_CURRENT_LIST_DIR}/../hello/pico_sdk_import.cmake)
 

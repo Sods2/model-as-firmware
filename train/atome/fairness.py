@@ -1,4 +1,4 @@
-"""Run: train/.venv/Scripts/python.exe train/atome/fairness.py
+"""Run: python train/atome/fairness.py
 
 Fairness check: Atome's corpus script builds its training text from TinyStoriesV2-GPT4-valid.txt (our test file),
 cleaned (whitespace normalised, paragraphs deduplicated) and capped at --max-bytes (default 1,000,000).

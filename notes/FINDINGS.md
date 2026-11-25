@@ -41,7 +41,7 @@ Setup for all numbers:
 | best-of (F28), two cores | flash, linear as code in SRAM (fc2/fc3 code) | 1.99 ms | 0.30M | 9.39x | 157.2 KB | 127.7 KB* | `results/phase1.csv` |
 | **best-of (F28), two cores** | **SRAM** | **1.67 ms** | **0.25M** | **8.69x** | 133.3 KB | 136.8 KB* | `results/phase1.csv` |
 
-† Same place, not always the same conditions. Two-core rows are compared against one-core CMSIS-NN. In the "linear in SRAM" / "fc1 in SRAM" rows, mafc keeps those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM). Against CMSIS-NN from SRAM (14.52 ms), those rows are 3.5x (4.11 ms), 5.0x (2.89 ms), 4.05x (3.59 ms), 6.2x (2.35 ms) and 6.4x (2.27 ms). The fair one-core, same-memory figure is **4.08x**. The faster builds also use more flash than CMSIS-NN (156–161 KB vs 94 KB). The ratios use CMSIS-NN with int8 weights. With its 4-bit kernel for fc1 (F27), CMSIS-NN's flash build gets 7% faster (17.41 ms), so every flash ratio above shrinks by about 7% (8.23x → 7.67x, 5.22x → 4.85x). Its SRAM build gets slower, so the SRAM ratios stand.
+† Same place, not always the same conditions. Two-core rows are compared against one-core CMSIS-NN. In the "linear in SRAM" / "fc1 in SRAM" rows, mafc keeps those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM). Against CMSIS-NN from SRAM (14.52 ms), those rows are 3.5x (4.11 ms), 5.0x (2.89 ms), 4.05x (3.59 ms), 6.2x (2.35 ms) and 6.4x (2.27 ms). The fair one-core, same-memory figure is **4.72x** since F28 (it was 4.08x before). The faster builds also use more flash than CMSIS-NN (133–137 KB for the F28 builds, 156–161 KB before, against 94 KB). The ratios use CMSIS-NN with int8 weights. With its 4-bit kernel for fc1 (F27), CMSIS-NN's flash build gets 7% faster (17.41 ms), so every flash ratio above shrinks by about 7% (8.23x → 7.67x, 5.22x → 4.85x). Its SRAM build gets slower, so the SRAM ratios stand.
 
 \* RAM counted the new way (from 11 Nov, F16): every section linked at an SRAM address, excluding heap and stacks. The older rows used data + bss (+ text for SRAM builds). That overstated SRAM builds by about 5–6 KB, understated flash builds by about 2 KB, and would have missed code placed in SRAM entirely.
 
@@ -491,11 +491,11 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - The load-balancing fix was chosen after looking at test accuracy (MNIST has no separate validation split here).
   - The integer builds that were timed differ by 0.32 points (99.47% → 99.15%); 0.30 is the PyTorch figure.
   - The stage speedups come from test image 0. The tree's cost depends on the leaf reached; over 200 images, the whole-model saving gives about 3.7x for the replaced layers rather than 3.8x.
-- **Keep criterion** (HANDOFF: ≥3x fewer bytes and lower latency for the tree layers, <1 point accuracy loss): **met.** 6.6x fewer weights read, 3.4–6.2x faster, −0.30 points.
+- **Keep criterion** (plan, docs/history/plan.md: ≥3x fewer bytes and lower latency for the tree layers, <1 point accuracy loss): **met.** 6.6x fewer weights read, 3.4–6.2x faster, −0.30 points.
 - **Reading:**
   - For MNIST the whole-model gain is small from SRAM (9%), because fc1 + fc2 were only about 13% of the time; the conv stack dominates.
   - Where weights come from flash, the tree halves the whole model (8.05 → 4.09 ms) without moving anything to SRAM (12.9 KB of RAM). The bytes it skips are the bytes that cost.
-  - That is the case idea B is for: models whose feedforward weights don't fit in SRAM, where flash traffic sets the speed (F22). The next test is the tiny story model (HANDOFF section 7), where feedforward layers dominate.
+  - That is the case idea B is for: models whose feedforward weights don't fit in SRAM, where flash traffic sets the speed (F22). The next test is the tiny story model (docs/history/plan.md section 7), where feedforward layers dominate.
   - Training needs care: without load balancing the tree collapses silently, and the soft-phase accuracy hides it (hard routing must be what is evaluated).
 
 ### F26. Phase 3: the tree twin of our ternary story model runs at 310 tok/s on the Pico 2 over the first 24 positions (201 over the 256 window), 2.1–2.5x faster than its dense twin (1.7–2.2x over the full window) for 4.7% in bits/byte; on our test text both score 0.5 bits/byte better than Atome (caveats below)
@@ -549,7 +549,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
 
 - **Reading:**
   - From flash, halving fc1's bytes cuts the flash traffic by 35% and saves 7% overall. fc1 is 1.55x faster.
-  - From SRAM, the s4 kernel's nibble unpacking costs more than it saves: fc1 is 1.78x slower. **CMSIS-NN's best build from SRAM is still s8**, so the Gate 1 bar (14.52 ms; 14.54 ms on the re-run) and the like-for-like **4.08x** stand.
+  - From SRAM, the s4 kernel's nibble unpacking costs more than it saves: fc1 is 1.78x slower. **CMSIS-NN's best build from SRAM is still s8**, so the Gate 1 bar (14.52 ms; 14.54 ms on the re-run) and the like-for-like **4.08x** stand (4.72x since F28).
   - From flash, CMSIS-NN's best build is now s4 (17.41 ms). Our flash-build ratios against it shrink by about 7%:
 
     | Our build (linear layers in SRAM) | vs s8 flash | vs s4 flash |
@@ -596,7 +596,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   | fff80 (tree, 99.15%), one core, SRAM | 3.23 ms | **2.77 ms** | 5.25x, lower accuracy | 117.2 KB | 120.5 KB |
   | fff80 (tree, 99.15%), two cores, SRAM | 1.86 ms | **1.53 ms** | 9.49x, lower accuracy, two cores vs one | 118.8 KB | 122.8 KB |
 
-  † CMSIS-NN int8 from the same memory (14.52 ms SRAM, 18.70 ms flash), on one core. Against a perfectly parallel two-core CMSIS-NN (≥ 7.26 ms) the two-core SRAM build would be at least 4.4x.
+  † CMSIS-NN int8 from the same memory (14.52 ms SRAM, 18.70 ms flash), on one core. Against a perfectly parallel two-core CMSIS-NN (≥ 7.26 ms) the two-core SRAM build would be at least 4.3x (7.26 / 1.67).
 - **Reading:**
   - The fastest full-accuracy build is now 1.67 ms (−16%), and the like-for-like lead over CMSIS-NN is 4.72x (was 4.08x). The gain is all in the conv stack, which CMSIS-NN handles badly for this shape (F5), so the scope of Gate 1 is unchanged.
   - The fastest build is also smaller than the old one (133 KB of flash and 137 KB of SRAM, against 156 and 161 KB), because fc2/fc3 are dense data instead of code.
@@ -610,7 +610,7 @@ The Gate 1 bar is CMSIS-NN in its best setup (SRAM, 14.52 ms, **one core**). Our
   - That build uses about 1.5x CMSIS-NN's flash (137 vs 94 KB) and about 1.1x its SRAM (140 vs 127 KB).
   - With less flash than CMSIS-NN (the all-data build, 49.5 KB), it is 2.78x.
 - **Not like for like:**
-  - 8.69x with both cores against CMSIS-NN's one (1.67 ms, F28; 7.28x before). Against a perfectly parallel two-core CMSIS-NN it would be at least 4.4x.
+  - 8.69x with both cores against CMSIS-NN's one (1.67 ms, F28; 7.28x before). Against a perfectly parallel two-core CMSIS-NN it would be at least 4.3x.
   - 5.22x for a one-core flash build that keeps the linear layers as code in SRAM, against int8 CMSIS-NN entirely in flash (18.70 ms). Against CMSIS-NN's best flash build (fc1 as s4, 17.41 ms, F27) it is 4.85x, and against CMSIS-NN from SRAM 4.05x.
 
 Scope (F5, F17):
@@ -634,12 +634,12 @@ Scope (F5, F17):
 
 | Gate | Criterion | Status | Evidence |
 |---|---|---|---|
-| 0 | Board output = PyTorch, read as bit-exact with the integer golden model (F1); baseline numbers logged (HANDOFF §6); energy, step 2b (GETTING-STARTED.md) | **Met except energy** | F1; `results/phase0.csv` |
-| 1 | Beats CMSIS-NN at equal accuracy (HANDOFF §6) | **Met, with a stated scope:** 4.72x like for like on one core (4.08x at the verdict; F28) | "Gate 1"; F17, F27 |
-| 2 | Two cores, DMA, PIO and ideas A–D, each against its keep-if threshold (roadmap; HANDOFF §7) | **Partly:** two cores, SIMD/DSP, DMA and ideas A, B and C are done. Idea D and PIO were not tried | Next table |
+| 0 | Board output = PyTorch, read as bit-exact with the integer golden model (F1); baseline numbers logged (docs/history/plan.md §6); energy, step 2b (GETTING-STARTED.md) | **Met except energy** | F1; `results/phase0.csv` |
+| 1 | Beats CMSIS-NN at equal accuracy (docs/history/plan.md §6) | **Met, with a stated scope:** 4.72x like for like on one core (4.08x at the verdict; F28) | "Gate 1"; F17, F27 |
+| 2 | Two cores, DMA, PIO and ideas A–D, each against its keep-if threshold (roadmap; docs/history/plan.md §7) | **Partly:** two cores, SIMD/DSP, DMA and ideas A, B and C are done. Idea D and PIO were not tried | Next table |
 | 3 | Tiny story model on the Pico, beating Atome's ~1 tok/s (roadmap) at the same model size (FEASIBILITY-STUDY.md, "What changes in the plan" #4) | **Met, not like for like** | F26; [lm.md](lm.md) |
 
-### Ideas against their keep-if thresholds (HANDOFF §7)
+### Ideas against their keep-if thresholds (docs/history/plan.md §7)
 
 | Idea | Keep if | Result | Verdict |
 |---|---|---|---|
@@ -671,7 +671,7 @@ Scope (F5, F17):
 - **Task size:** MNIST is a tiny task, and the Gate 1 margin depends on the model's shape (F5, F17).
 - **Language-model baseline:** none is strong. The dense/tree twins are the controlled comparison.
 
-### Recommendation for Phase 4 (the decision is the user's)
+### Recommendation for Phase 4 (an open decision)
 
 Nothing in the Pico phases rules out continuing. Three results call for caution:
 - code costs about twice the estimate;
@@ -690,7 +690,7 @@ Phase 4 asks a different question: models larger than fast memory, with storage 
 - **Before any larger spend:**
   1. **Measure energy with an INA226** (a few euros). This closes Gate 0 and fills the last metric in the table.
   2. **Optionally, run a model larger than SRAM on the Pico 2.** Ideas C and G applied to the story model's flash builds would test the storage-tier mechanism on hardware already on hand.
-  3. **Confirm the Pi 4's RAM, a microSD card and a power supply** (HANDOFF §9).
+  3. **Confirm the Pi 4's RAM, a microSD card and a power supply** (a Phase 4 prerequisite).
 
 ## Open questions and next experiments
 

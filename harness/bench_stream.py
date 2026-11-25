@@ -4,9 +4,9 @@ in place through the XIP cache. One dense int8 linear layer, 256 -> 256 (64 KB o
   gen:  write firmware/bench/stream/gen/stream_data.h (weights, input, expected output checksum)
   run:  drive the flashed benchmark firmware over USB serial and append rows to results/bench_stream.csv
 
-  train/.venv/Scripts/python.exe harness/bench_stream.py gen
+  python harness/bench_stream.py gen
   (build + flash firmware/bench/stream, flash build: the weights must stay in flash)
-  train/.venv/Scripts/python.exe harness/bench_stream.py run --port COM3
+  python harness/bench_stream.py run --port COM3
 """
 import argparse
 import csv

@@ -1,6 +1,6 @@
 """Compile a MafLM integer model (.npz) into C data for the RP2350 LM runtime (firmware/rp2350/maflm).
 
-    train/.venv/Scripts/python.exe compiler/compile_lm.py --npz train/runs/check_tree.npz --name check_tree
+    python compiler/compile_lm.py --npz train/runs/check_tree.npz --name check_tree
 """
 import argparse
 from pathlib import Path

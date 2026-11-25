@@ -1,7 +1,7 @@
 """Train a MafLM twin on TinyStories V2 (bytes), with the bits-per-byte evaluation used for Atome (train/atome/ref.py).
 
-    .venv/Scripts/python.exe lm/train.py --ffn dense --steps 10000 --out models/lm_dense.pt
-    .venv/Scripts/python.exe lm/train.py --ffn tree  --steps 10000 --out models/lm_tree.pt
+    python lm/train.py --ffn dense --steps 10000 --out runs/lm_dense.pt
+    python lm/train.py --ffn tree  --steps 10000 --out runs/lm_tree.pt
 
 The training text is read straight from the .txt file as bytes (np.memmap), random windows of seq+1 bytes.
 Evaluation: the first --eval-bytes of the validation file in non-overlapping windows, as ref.py does; the tree is

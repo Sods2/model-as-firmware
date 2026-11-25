@@ -1,6 +1,6 @@
 """mafc command line: compile a trained model to RP2350 C.
 
-  train/.venv/Scripts/python.exe compiler/compile.py --model tern80
+  python compiler/compile.py --model tern80
       reads  train/export/tern80.h
       writes firmware/rp2350/mafc/gen/mafc_tern80.c (+ .ir.json), checks the IR against the golden model
   ... --cores 2   writes gen/mafc_tern80_dual.c (conv channels and big linear layers split across both cores)

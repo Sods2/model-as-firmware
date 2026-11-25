@@ -9,7 +9,7 @@ integers 2u (+-1 .. +-15), as harness/golden.py decodes them from the header.
                  fc3 (10, d_out); depth, leaf; quant names per tensor
 
 Usage (from the repo root):
-  train/.venv/Scripts/python.exe train/export_fff.py --params train/configs/fff_cnn80.yaml --pth train/models/fff80.pth \
+  python train/export_fff.py --params train/configs/fff_cnn80.yaml --pth train/models/fff80.pth \
       --out train/export/fff80.npz
 """
 import argparse

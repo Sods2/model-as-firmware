@@ -4,7 +4,7 @@
 - greedy continuations for fixed prompts, using the same window the C engine is compiled with
   (Atome's generate() re-runs the whole window for every token, exactly like atome_predict_next).
 
-    .venv/Scripts/python.exe atome/ref.py --checkpoint atome-lm/checkpoints/atome_1m_v1.pt \
+    python atome/ref.py --checkpoint atome-lm/checkpoints/atome_1m_v1.pt \
         --max-seq 24 --json ../results/atome_ref.json
 """
 from __future__ import annotations

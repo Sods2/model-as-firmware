@@ -14,7 +14,7 @@ A meter with 1 mWh resolution gives power to +-3600/secs mW, so use long phases 
 --no-meter skips the prompts and only reports inferences per second (to check the firmware and the loop).
 
 Usage (from the repo root):
-  train/.venv/Scripts/python.exe harness/energy.py --port COM3 --model tern80 --secs 600 --reading mwh
+  python harness/energy.py --port COM3 --model tern80 --secs 600 --reading mwh
 """
 import argparse
 import csv

@@ -1,5 +1,5 @@
 # Wide-conv fairness benchmark (FINDINGS F17): CMSIS-NN vs mafc's weights-as-code on a 32 -> 32 channel 3x3 conv.
-# Generate the data and kernels first:  train/.venv/Scripts/python.exe harness/bench_conv.py gen
+# Generate the data and kernels first:  python harness/bench_conv.py gen
 # Uses the CMSIS-NN checkout of the baseline (firmware/baselines/cmsis_nn/third_party/CMSIS-NN).
 
 cmake_minimum_required(VERSION 3.13)

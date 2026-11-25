@@ -108,6 +108,11 @@ table.diff tr.x { background: #3A1A1D; color: var(--bad); font-weight: 700; }
 .ruler .now { position: absolute; top: 46px; height: 32px; width: 2px; background: var(--ok); }
 .ruler .tick { position: absolute; top: 106px; font-family: var(--mono); font-size: 11px; color: var(--dim); transform: translateX(-50%); }
 .scrollx { overflow-x: auto; }
+.help { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-size: 13px; color: var(--text2); }
+.help summary { cursor: pointer; font-weight: 600; color: var(--text); min-height: 24px; }
+.help ul { margin: 10px 0 4px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; max-width: 110ch; }
+.help b { color: var(--text); font-weight: 600; }
+.help code { font-family: var(--mono); font-size: 12px; }
 .hidden { display: none !important; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
@@ -121,9 +126,9 @@ table.diff tr.x { background: #3A1A1D; color: var(--bad); font-weight: 700; }
     <h1>Live execution</h1>
   </div>
   <div class="seg" role="group" aria-label="Mode">
-    <button type="button" data-mode="live" aria-pressed="true">Live</button>
-    <button type="button" data-mode="slow" aria-pressed="false">Slow-mo ×1000</button>
-    <button type="button" data-mode="replay" aria-pressed="false">Replay</button>
+    <button type="button" data-mode="live" aria-pressed="true" title="Follow the run as images stream through the target">Live</button>
+    <button type="button" data-mode="slow" aria-pressed="false" title="One image at a time, moving through the layers slowly; with a *_prof board build the stages take their real share of the time, 1000x slower than the board">Slow-mo</button>
+    <button type="button" data-mode="replay" aria-pressed="false" title="Step back through the images already received">Replay</button>
   </div>
   <div class="chips">
     <span id="state" class="chip state" role="status" aria-live="polite"><span class="dot"></span><span id="stateText">CONNECTING</span></span>
@@ -136,6 +141,18 @@ table.diff tr.x { background: #3A1A1D; color: var(--bad); font-weight: 700; }
 </header>
 
 <div id="banner" class="banner hidden" role="alert"></div>
+
+<details class="help" id="help">
+  <summary>What am I looking at?</summary>
+  <ul>
+    <li>10,000 handwritten digits (MNIST test set, 16×16 pixels) go one by one through a small CNN running on the <b id="helpTarget">target</b>. Each result comes back with its 10 output scores (<b>logits</b>) and, on the board, a cycle count.</li>
+    <li><b>Golden match</b> is the correctness check: the target's logits must equal, bit for bit, those of the <b>golden model</b>, an independent Python copy of the same integer arithmetic. A mismatch pauses the run behind a red banner.</li>
+    <li><b>Accuracy vs labels</b> and <b>Agrees with PyTorch</b> are fidelity checks: right answers, and the same prediction as the float model the weights came from. These don't have to be 100%.</li>
+    <li><b>Pipeline</b>: the network's layers in order. Click one to see what it computed for the current image in the <b>Inspector</b> (feature maps, the FC1 weight matrix, outputs). Per-layer times need a profiling (<code>*_prof</code>) board build.</li>
+    <li><b>Latency against the bar</b>: this run's time per image next to saved board runs. "The bar" is CMSIS-NN, Arm's standard library, running the same model from SRAM: the speed to beat.</li>
+  </ul>
+  <p class="note">Full guide, panel by panel: <code>docs/UI-GUIDE.md</code> in the repository.</p>
+</details>
 
 <section class="kpis" aria-label="Run summary">
   <div class="kpi"><span class="k">Images</span><span class="v" id="kN">0</span><div class="progress"><div id="kProg"></div></div></div>
@@ -219,7 +236,7 @@ table.diff tr.x { background: #3A1A1D; color: var(--bad); font-weight: 700; }
 <section class="panel" aria-labelledby="latH">
   <div class="panel-head">
     <h2 id="latH">Latency against the bar</h2>
-    <span class="note">Markers: the latest results/phase0.csv run per build for this model. Green: this run.</span>
+    <span class="note">Grey: saved board runs for this model (results/phase0.csv baselines, best compiler builds from results/phase1.csv). Green: this run.</span>
   </div>
   <div class="scrollx"><div class="ruler" id="ruler"></div></div>
   <p class="note" id="rulerNote"></p>
@@ -243,7 +260,7 @@ const LAYERS = [
     title: 'DW2 · depthwise conv, 4×4', desc: 'The second depthwise filter.' },
   { id: 'pool2', name: 'Pool2', op: 'MaxPool 2×2', shape: '80×2×2 → 320', color: '#8A939C', kind: 'maps',
     title: 'Pool2 · 2×2 per channel', desc: '80 channels × 4 values are flattened into the 320 inputs of FC1.' },
-  { id: 'fc1', name: 'FC1', op: '320→96 · ternary w', shape: '96', color: '#E2B84F', kind: 'ternary',
+  { id: 'fc1', name: 'FC1', op: '320→96 · ternary w', shape: '96', color: '#E2B84F', kind: 'weights',
     title: 'FC1 · ternary weights −1 / 0 / +1', desc: 'No multiplies: each +1 adds its input, each −1 subtracts it, each 0 is skipped.' },
   { id: 'fc2', name: 'FC2', op: '96→64 · 4-bit w', shape: '64', color: '#ECCF86', kind: 'vector',
     title: 'FC2 · 96→64', desc: 'Activations after FC2 and its rescale.' },
@@ -251,6 +268,21 @@ const LAYERS = [
     title: 'FC3 · 64→10 logits', desc: 'One score per digit. The prediction is the index of the first maximum.' }
 ];
 const STAGE_IDS = LAYERS.slice(1).map(l => l.id);
+const FC_DIMS = { fc1: '320→96', fc2: '96→64', fc3: '64→10' };
+function applyWeightKinds(k) {   // captions follow the model: ternary, 4-bit or 8-bit weights
+  if (!k) return;
+  for (const id of ['fc1', 'fc2', 'fc3']) {
+    const l = LAYERS.find(x => x.id === id);
+    if (k[id]) l.op = `${FC_DIMS[id]} · ${k[id]} w`;
+  }
+  const f = LAYERS.find(x => x.id === 'fc1');
+  if (k.fc1 && k.fc1 !== 'ternary') {
+    f.title = `FC1 · ${k.fc1} weights`;
+    f.desc = `This model's FC1 uses ${k.fc1} weights, so each weight is a multiply. Orange: negative, blue: positive, brighter = larger.`;
+  }
+  const box = $('blocks');
+  for (const b of box.children) { const l = LAYERS.find(x => x.id === b.dataset.id); b.querySelector('.op').textContent = l.op; }
+}
 const HEAT = ['#141A20', '#153230', '#184740', '#1C5D50', '#227362', '#2A8A74', '#35A287', '#47BB9B', '#63D5B0'].map(hex);
 const TERN = { n: hex('#F0803C'), z: hex('#262E36'), p: hex('#6CB4FF') };
 const MAX_MAPS = 16;
@@ -295,7 +327,11 @@ async function post(q) {
 function hz() { return S.info && S.info.sys_hz ? S.info.sys_hz : 0; }
 function stageMs() { // per-stage ms from the latest stages event, or null
   if (!S.stages || !hz()) return null;
-  return STAGE_IDS.map(id => (S.stages.cycles[id] || 0) / hz() * 1e3);
+  // builds with fused pools (compile.py --fuse-pool) report 'dw1+pool1': its time goes to the conv, the pool shows "fused"
+  const c = S.stages.cycles, fused = {};
+  S.fusedInto = {};
+  for (const [k, v] of Object.entries(c)) if (k.includes('+')) { const [a, b] = k.split('+'); fused[a] = v; fused[b] = 0; S.fusedInto[b] = a; }
+  return STAGE_IDS.map(id => (c[id] ?? fused[id] ?? 0) / hz() * 1e3);
 }
 
 // ---------- event stream ----------
@@ -354,6 +390,8 @@ function renderInfo() {
   $('chipPort').textContent = i.port; $('chipPort').classList.toggle('hidden', !i.port);
   $('chipHz').textContent = (i.sys_hz / 1e6) + ' MHz'; $('chipHz').classList.toggle('hidden', !i.sys_hz);
   if (i.rate != null) { S.rate = i.rate; $('rate').value = String(i.rate); }
+  renderBlocks(); applyWeightKinds(i.weight_kinds);
+  $('helpTarget').textContent = { golden: 'golden model itself (no hardware)', host: 'C reference compiled for this PC', pico: 'Pico 2 board' }[i.target] || 'target';
 }
 
 function renderBanner() {
@@ -390,14 +428,19 @@ function renderKpis() {
   $('kN').textContent = fmt(s.n || 0);
   $('kN').append(el('span', { style: 'color:var(--dim);font-size:15px' }, ' / ' + fmt(total)));
   $('kProg').style.width = total ? ((s.n || 0) / total * 100) + '%' : '0';
-  const g = $('kGold');
-  g.textContent = s.golden_match_pct != null ? fmt(s.golden_match_pct, 2) + '%' : '—';
-  g.style.color = s.mismatches ? 'var(--bad)' : (s.n ? 'var(--ok)' : '');
-  $('kGoldS').textContent = s.n ? `${fmt(s.mismatches)} logit mismatch${s.mismatches === 1 ? '' : 'es'}` : '';
+  const g = $('kGold'), selfCheck = S.info && S.info.target === 'golden';
+  if (selfCheck) {
+    g.textContent = 'n/a'; g.style.color = '';
+    $('kGoldS').textContent = 'this target is the golden model';
+  } else {
+    g.textContent = s.golden_match_pct != null ? fmt(s.golden_match_pct, 2) + '%' : '—';
+    g.style.color = s.mismatches ? 'var(--bad)' : (s.n ? 'var(--ok)' : '');
+    $('kGoldS').textContent = s.n ? `${fmt(s.mismatches)} logit mismatch${s.mismatches === 1 ? '' : 'es'}` : '';
+  }
   $('kAcc').textContent = s.accuracy_pct != null ? fmt(s.accuracy_pct, 2) + '%' : '—';
   $('kAccS').textContent = s.n ? `${fmt(s.wrong)} wrong of ${fmt(s.n)}` : '';
   $('kPt').textContent = s.pytorch_agree_pct != null ? fmt(s.pytorch_agree_pct, 2) + '%' : '—';
-  $('kPtS').textContent = s.pytorch_agree_pct != null ? 'same prediction as the float model' : (s.n ? 'check skipped' : '');
+  $('kPtS').textContent = s.pytorch_agree_pct != null ? 'same prediction as the float model' : (s.n ? 'check skipped (BitNetMCU not cloned)' : '');
   if (s.latency_ms_mean != null) {
     $('kLat').textContent = fmt(s.latency_ms_mean, 2) + ' ms';
     $('kLatS').textContent = `min ${fmt(s.latency_ms_min, 2)} · max ${fmt(s.latency_ms_max, 2)}`;
@@ -406,7 +449,8 @@ function renderKpis() {
     $('kLatS').textContent = S.info && !S.info.sys_hz ? 'no cycle counter on this target' : '';
   }
   $('kRate').textContent = s.images_per_s != null ? fmt(s.images_per_s, 1) : '—';
-  $('kRateS').textContent = 'images/s incl. USB · speed ' + (S.rate ? S.rate + '/s' : 'unthrottled');
+  const via = S.info && S.info.target === 'pico' ? 'incl. USB' : 'on this PC';
+  $('kRateS').textContent = `images/s ${via} · speed ` + (S.rate ? S.rate + '/s' : 'unthrottled');
 }
 
 function renderBlocks() {
@@ -426,9 +470,9 @@ function renderBlocks() {
     const id = b.dataset.id, k = STAGE_IDS.indexOf(id);
     b.setAttribute('aria-pressed', String(id === S.sel));
     b.classList.toggle('active', id === active);
-    const has = ms && k >= 0;
-    b.querySelector('.ms').textContent = has ? fmt(ms[k], 2) + ' ms' : (k >= 0 ? '—' : '');
-    b.querySelector('.pc').textContent = has ? fmt(ms[k] / total * 100, 1) + '%' : '';
+    const has = ms && k >= 0, into = has && S.fusedInto[id];
+    b.querySelector('.ms').textContent = into ? 'fused' : has ? fmt(ms[k], 2) + ' ms' : (k >= 0 ? '—' : '');
+    b.querySelector('.pc').textContent = into ? 'into ' + LAYERS.find(x => x.id === into).name : has ? fmt(ms[k] / total * 100, 1) + '%' : '';
     b.querySelector('.bar span').style.width = has ? (ms[k] / total * 100) + '%' : '0';
   }
 }
@@ -449,7 +493,9 @@ function renderTrack() {
     ? `One image: ${fmt(S.stages.cycles ? Object.values(S.stages.cycles).reduce((a, b) => a + b, 0) : 0)} cycles = ${fmt(total, 2)} ms (image #${S.stages.idx})`
     : (S.info && S.info.sys_hz ? 'Flash a *_prof build to see time per stage' : 'No cycle counter on this target: stages drawn at equal width');
   $('axis').replaceChildren(...(ms ? [0, .25, .5, .75, 1].map(f => el('span', {}, f === 1 ? fmt(total, 2) + ' ms' : fmt(total * f, 1))) : []));
-  const cap = { live: 'One sweep per image, drawn at 1/100 speed', slow: '1000× slower, one image at a time; the inspector follows the cursor', replay: 'Step through this run by image or by stage' };
+  const cap = ms
+    ? { live: 'Each stage drawn at its share of the time; the cursor sweeps 100× slower than the board', slow: '1000× slower than the board, one image at a time; the inspector follows the cursor', replay: 'Step through this run by image or by stage' }
+    : { live: 'The cursor only shows that images are flowing', slow: 'One image every 8 s, one layer after another (not to scale: no per-stage times)', replay: 'Step through this run by image or by stage' };
   $('trackCaption').textContent = cap[S.mode];
 }
 
@@ -592,19 +638,32 @@ function renderInspector() {
         el('div', { class: 'legend' }, el('span', { class: 'note' }, S.showAll ? `All ${C} channels in order` : `${MAX_MAPS} most active of ${C} channels`),
           heatLegend(), toggle),
         el('div', { class: 'maps' }, ...figs)));
-  } else if (l.kind === 'ternary') {
-    if (!S.weights) { fetch('/weights').then(r => r.json()).then(w => { S.weights = w; schedule(); }); body.replaceChildren(el('p', { class: 'note' }, 'Loading weights…')); return; }
-    const w = S.weights, [R, Cn] = w.shape, tot = R * Cn, cnt = w.counts;
-    const cv = el('canvas', { class: 'px', style: 'width:100%;border-radius:4px', role: 'img', 'aria-label': `FC1 ternary weight matrix, ${R} by ${Cn}` });
-    drawGrid(cv, Cn, R, i => TERN[w.rows[Math.floor(i / Cn)][i % Cn]]);
+  } else if (l.kind === 'weights') {
+    if (!S.weights) {
+      if (!S.weightsPending) {
+        S.weightsPending = true;
+        fetch('/weights').then(r => r.json()).then(w => { S.weights = w; })
+          .catch(e => { S.weights = { error: String(e) }; }).finally(() => { S.weightsPending = false; schedule(); });
+      }
+      body.replaceChildren(el('p', { class: 'note' }, 'Loading weights…'));
+      return;
+    }
+    const w = S.weights;
+    if (w.error) { body.replaceChildren(el('p', { class: 'note' }, 'Weights unavailable: ' + w.error), vectorStrip('FC1 output for this image', a.layers.fc1.data)); return; }
+    const [R, Cn] = w.shape, tot = R * Cn, cnt = w.counts, tern = w.kind === 'ternary';
+    const cv = el('canvas', { class: 'px', style: 'width:100%;border-radius:4px', role: 'img', 'aria-label': `FC1 ${w.kind} weight matrix, ${R} by ${Cn}` });
+    const mix = (c, t) => TERN.z.map((z, k) => Math.round(z + (c[k] - z) * t));
+    drawGrid(cv, Cn, R, tern ? (i => TERN[w.rows[Math.floor(i / Cn)][i % Cn]])
+      : (i => { const v = w.values[i], t = Math.abs(v) / Math.max(1, w.absmax); return v === 0 ? TERN.z : mix(v < 0 ? TERN.n : TERN.p, 0.25 + 0.75 * t); }));
     cv.style.aspectRatio = `${Cn} / ${R}`;
     const sw = (c, b) => el('span', { class: 'sw', style: `background:${c}${b ? ';outline:1px solid #4A535C' : ''}` });
+    const nm = tern ? ['−1', '0', '+1'] : ['negative', '0', 'positive'];
     body.replaceChildren(el('div', { style: 'display:flex;flex-direction:column;gap:14px' },
       el('div', { class: 'legend' },
-        el('span', {}, sw('#F0803C'), '−1', el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.neg)} · ${fmt(cnt.neg / tot * 100, 1)}%`)),
-        el('span', {}, sw('#262E36', 1), '0', el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.zero)} · ${fmt(cnt.zero / tot * 100, 1)}%`)),
-        el('span', {}, sw('#6CB4FF'), '+1', el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.pos)} · ${fmt(cnt.pos / tot * 100, 1)}%`)),
-        el('span', { class: 'mono note' }, `${fmt(tot)} weights`)),
+        el('span', {}, sw('#F0803C'), nm[0], el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.neg)} · ${fmt(cnt.neg / tot * 100, 1)}%`)),
+        el('span', {}, sw('#262E36', 1), nm[1], el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.zero)} · ${fmt(cnt.zero / tot * 100, 1)}%`)),
+        el('span', {}, sw('#6CB4FF'), nm[2], el('span', { class: 'mono note', style: 'margin-left:10px' }, `${fmt(cnt.pos)} · ${fmt(cnt.pos / tot * 100, 1)}%`)),
+        el('span', { class: 'mono note' }, `${fmt(tot)} weights` + (tern ? '' : `, |w| up to ${w.absmax}`))),
       el('figure', { style: 'margin:0;display:flex;flex-direction:column;gap:6px' }, cv,
         el('figcaption', { class: 'note', style: 'font-size:12px' }, `All ${R} outputs (rows) × ${Cn} inputs (columns).`)),
       vectorStrip('FC1 output for this image', a.layers.fc1.data)));
@@ -637,9 +696,17 @@ let lastRulerKey = '';
 function renderRuler() {
   if (!S.info) return;
   const s = S.summary || {};
-  const latest = {};
-  for (const r of S.phase0) if (r.model === S.info.model && r.target === 'pico' && r.latency_ms_mean) latest[r.build] = r;
-  const marks = Object.values(latest).map(r => ({ build: r.build, ms: parseFloat(r.latency_ms_mean) }));
+  const latest = {}, best = {};
+  for (const r of S.phase0) {
+    if (r.model !== S.info.model || r.target !== 'pico' || !r.latency_ms_mean) continue;
+    if (r.source === 'phase1' && r.build.startsWith('mafc')) {   // compiler builds: the fastest bit-exact one-core and two-core runs
+      if (parseFloat(r.golden_match_pct) !== 100) continue;
+      const k = r.build.includes('dual') ? 'mafc, 2 cores' : 'mafc, 1 core';
+      if (!best[k] || parseFloat(r.latency_ms_mean) < best[k].ms) best[k] = { build: k, ms: parseFloat(r.latency_ms_mean), title: r.build };
+    } else if (r.source !== 'phase1' || !latest[r.build] || latest[r.build].source === 'phase1') latest[r.build] = r;   // Phase 0 baselines first
+  }
+  const marks = Object.values(latest).map(r => ({ build: r.build, ms: parseFloat(r.latency_ms_mean), title: r.build }))
+    .concat(Object.values(best));
   const live = s.latency_ms_mean != null ? s : null;
   const key = JSON.stringify([marks, live && [live.latency_ms_mean, live.latency_ms_min, live.latency_ms_max]]);
   if (key === lastRulerKey) return;
@@ -649,11 +716,10 @@ function renderRuler() {
   const R = $('ruler'), kids = [el('div', { class: 'rail' })];
   const bar = marks.find(m => m.build === 'cmsis_nn_ram');
   if (bar) kids.push(el('div', { class: 'bar', style: 'left:' + X(bar.ms) }),
-    el('div', { class: 'lbl', style: `left:${X(bar.ms)};top:4px` }, el('span', { style: 'color:var(--warn);font-weight:600' }, 'the bar'), el('br'), el('span', { class: 'mono' }, fmt(bar.ms, 2))));
+    el('div', { class: 'lbl', style: `left:${X(bar.ms)};top:4px`, title: 'CMSIS-NN (Arm\'s standard neural-network library) running this model from SRAM: the speed to beat (Gate 1)' }, el('span', { style: 'color:var(--warn);font-weight:600' }, 'the bar'), ' · cmsis_nn_ram', el('br'), el('span', { class: 'mono' }, fmt(bar.ms, 2))));
   marks.filter(m => m !== bar).forEach((m, i) => kids.push(
     el('div', { class: 'mk', style: 'left:' + X(m.ms) }),
-    el('div', { class: 'lbl', style: `left:${X(m.ms)};top:${i % 2 ? 4 : 78}px` }, m.build, el('br'), el('span', { class: 'mono' }, fmt(m.ms, 2)))));
-  if (bar) kids.push(el('div', { class: 'lbl', style: `left:${X(bar.ms)};top:90px` }, 'cmsis_nn_ram'));
+    el('div', { class: 'lbl', style: `left:${X(m.ms)};top:${i % 2 ? 4 : 78}px`, title: m.title }, m.build, el('br'), el('span', { class: 'mono' }, fmt(m.ms, 2)))));
   if (live) kids.push(
     el('div', { class: 'band', style: `left:${X(live.latency_ms_min)};width:calc(${X(live.latency_ms_max)} - ${X(live.latency_ms_min)} + 2px)` }),
     el('div', { class: 'now', style: 'left:' + X(live.latency_ms_mean) }));

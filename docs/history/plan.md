@@ -1,17 +1,17 @@
-# Model as Firmware: Handover Report
+# Model as Firmware: the plan and how it went
 
-*Written 10 Nov 2026, to start a new working session; the status table (section 3) is kept up to date, last on 14 Nov 2026. Read this first, then [FEASIBILITY-STUDY.md](FEASIBILITY-STUDY.md) for detail and [SHOPPING-LIST.md](SHOPPING-LIST.md) for parts.*
+*The project plan as written on 10 Nov 2026, before most of the code existed, with the progress table kept up to date to 25 Nov 2026. It is kept as a record of what was decided and in what order things were tried. For the current state, see the [README](../../README.md) and [notes/FINDINGS.md](../../notes/FINDINGS.md); for the research behind the plan, [FEASIBILITY-STUDY.md](../../FEASIBILITY-STUDY.md).*
 
 ## 1. The project in one paragraph
 
 Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model file. A compiler on the PC turns a trained **ternary** model (weights −1, 0, +1) into the board's firmware, using every compute unit the chip has (so far both cores, DSP/SIMD instructions and DMA; PIO is planned). It is a software version of Taalas-style "model printed into the chip" hardware. The plan starts on a **Raspberry Pi Pico 2** and later moves to a Pi 4 or Pi 5, and eventually an FPGA.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/handoff-overview-dark.svg">
-  <img alt="Train a ternary model (PyTorch, on the PC), then the model compiler (Python, to build) produces a firmware image that is the model, for the Pico 2 now. Later the compiler also targets a bare-metal Pi 4 / Pi 5 and an FPGA via QONNX + hls4ml / FINN." src="docs/diagrams/handoff-overview.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="../diagrams/handoff-overview-dark.svg">
+  <img alt="Train a ternary model (PyTorch, on the PC), then the model compiler (Python, to build) produces a firmware image that is the model, for the Pico 2 now. Later the compiler also targets a bare-metal Pi 4 / Pi 5 and an FPGA via QONNX + hls4ml / FINN." src="../diagrams/handoff-overview.svg">
 </picture>
 
-## 2. Honest verdict (unchanged)
+## 2. Honest verdict
 
 - **Feasible as a proof of concept.** People already run language models bare-metal on Pi 4, Pi 5, Pi Zero clusters and ESP32.
 - **Don't expect Taalas-level gains.** Taalas gets ~70x by changing the silicon. Here the gain only comes from removing software overhead and memory traffic, so aim for "measurably better than CMSIS-NN at the same accuracy".
@@ -19,14 +19,13 @@ Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model 
 - **Why work on it:** the compiler is the lasting asset, because one front end can serve many back ends. Ideas B (tree-routed neurons), F (split layers across boards for language models) and G (an SRAM working-set cache) had **no microcontroller prior art found**.
 - **Why it might not pay off:** the building blocks already exist (Edge Impulse EON, TinyEngine, BitNetMCU, Atome LM at about 1 token/s on ESP32), so the novelty is in the combination and the results, not in any single trick.
 
-## 3. Status right now
+## 3. Progress (10–25 Nov 2026)
 
 | Area | Status |
 | --- | --- |
 | Research and feasibility | ✅ Done (feasibility study, prior art, verification, ideas A–H) |
-| Docs in repo | ✅ This repo (`Projects/model-as-firmware`), which holds both docs and code |
-| Hardware | ✅ On hand: one Pico 2 with headers, a micro-USB data cable, a Debug Probe (firmware v2.3.1, since 13 Nov), a USB power meter with its USB-C cable (too coarse for the Pico 2) and a Pi 4. Extra Picos, breadboard and wires aren't ordered yet; they're needed only for idea F |
-| Pico bring-up | ✅ Builds, flashes over SWD with the Debug Probe (`harness/flash.sh`; picotool over USB as the fallback), prints over USB serial (COM3). The cycle counter reads 150,251 cycles for 1 ms at 150 MHz, ±108 cycles of jitter over 700k |
+| Hardware | ✅ One Pico 2 with headers, a micro-USB data cable, a Debug Probe (firmware v2.3.1, from 13 Nov) and a USB power meter (too coarse for the Pico 2). Extra Picos, breadboard and wires are needed only for idea F, not tried. See [docs/HARDWARE.md](../HARDWARE.md) |
+| Pico bring-up | ✅ Builds, flashes over SWD with the Debug Probe (`harness/flash.sh`; picotool over USB as the fallback), prints over USB serial. The cycle counter reads 150,251 cycles for 1 ms at 150 MHz, ±108 cycles of jitter over 700k |
 | Energy measurement | ⏳ Tooling ready 12 Nov. The USB meter turned out too coarse (reads 0–4 mA for the Pico 2, 1 mA / 1 mW / 1 mWh steps), so this needs a finer instrument (INA226 breakout or Nordic PPK2). Firmware command `L` runs inference back to back for N seconds; `harness/measure.sh energy results/energy.csv <spec>...` builds, flashes and walks through an idle and a busy phase per build, asking for the meter readings (`harness/energy.py`). Checked on the board without the meter (`--no-meter`) |
 | BitNetMCU baseline | ✅ Reproduced: ternary CNN80 at 99.45% final / 99.48% best (99.52% reported). The 70% and 90% fc1-zero variants reach 99.44% and 99.50%. See `train/README.md` |
 | Plain-C reference, CMSIS-NN baseline, harness | ✅ Done 11 Nov (steps 4–6). Bit-exact with golden models on 10k images. ref_c: 99.47%, 10.21 ms (9.52 ms from SRAM). CMSIS-NN int8: 99.44%, 18.70 ms (14.52 ms from SRAM, the Gate 1 bar). See `results/README.md` |
@@ -50,9 +49,9 @@ Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model 
 | Best-of build | ✅ 25 Nov. `--fuse-pool --row-pairs`: max pools fused into the convs, conv1 two rows per step, fc2/fc3 dense. **1.67 ms from SRAM on two cores, 3.08 ms on one core (4.72x like for like)**, 1.99 ms two cores from flash; tree 1.53 ms. Bit-exact on 10k images (FINDINGS F28) |
 | Gate 1 | ✅ Met 11 Nov at equal accuracy: 3.75x one core against one core (4.08x after F18, 4.72x after F28), 6.25x with both cores against CMSIS-NN on one core (6.77x after F18, 8.69x after F28). Scope in FINDINGS F17 and "Gate 1": much of the MNIST lead comes from CMSIS-NN's weak kernels for this model's shape (F5), and the faster builds use more flash and SRAM than CMSIS-NN. Energy not yet measured |
 | Atome LM baseline | ✅ Reproduced 13 Nov: bit-exact on the PC and on the Pico 2, 1.711 bits/byte on our test text, 0.71 tok/s with its own engine (which recomputes the context for every token). Used as an external yardstick only; the comparison's caveats are in `notes/lm.md`, "Fairness of the Atome comparison" |
-| Gate 3 (end of the Pico phases) | ✅ Verdict 14 Nov: **feasible as a proof of concept for speed, on models that fit the Pico 2's SRAM.** Gates: 0 met except energy; 1 met with a stated scope; 2 partly (idea D and PIO not tried); 3 met, not like for like. Limits: energy not measured; weights as code shown on MNIST only (all of the story model's ~530K non-zero weights would take ~3 MB as code; code for its small matrices was not tried); no strong language-model baseline. Phase 4 is your decision; recommended first: energy (INA226), then optionally a model larger than SRAM on the Pico 2 (FINDINGS, "Gate 3") |
+| Gate 3 (end of the Pico phases) | ✅ Verdict 14 Nov: **feasible as a proof of concept for speed, on models that fit the Pico 2's SRAM.** Gates: 0 met except energy; 1 met with a stated scope; 2 partly (idea D and PIO not tried); 3 met, not like for like. Limits: energy not measured; weights as code shown on MNIST only (all of the story model's ~530K non-zero weights would take ~3 MB as code; code for its small matrices was not tried); no strong language-model baseline. Phase 4 is an open decision; recommended first: energy (INA226), then optionally a model larger than SRAM on the Pico 2 (FINDINGS, "Gate 3") |
 
-*Status updated 14 Nov 2026. The step-by-step log is in [GETTING-STARTED.md](GETTING-STARTED.md).*
+*The dated, step-by-step lab log is [notes/LOG.md](../../notes/LOG.md).*
 
 ## 4. Decisions already made
 
@@ -64,11 +63,11 @@ Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model 
 6. **Reuse, don't rebuild:** BitNetMCU's training code for Phase 0, Atome LM as the language-model baseline, and hls4ml or FINN for the FPGA phase.
 7. **Every idea is an experiment** with a "keep if" threshold. Nothing replaces the base design unless it measurably wins.
 
-## 5. Hardware setup (once parts arrive)
+## 5. Hardware setup (as planned)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/hardware-setup-dark.svg">
-  <img alt="Hardware setup. The PC or laptop (build and test harness) connects over USB to the Debug Probe (CMSIS-DAP), which reaches Pico 2 #1, the target, by an SWD cable (3-pin JST) and a UART cable. The PC also powers and flashes the Pico over USB, through a USB power meter (mWh). Later, for idea F, Pico 2 #2 and #3 join with jumper wires in a star layout." src="docs/diagrams/hardware-setup.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="../diagrams/hardware-setup-dark.svg">
+  <img alt="Hardware setup. The PC or laptop (build and test harness) connects over USB to the Debug Probe (CMSIS-DAP), which reaches Pico 2 #1, the target, by an SWD cable (3-pin JST) and a UART cable. The PC also powers and flashes the Pico over USB, through a USB power meter (mWh). Later, for idea F, Pico 2 #2 and #3 join with jumper wires in a star layout." src="../diagrams/hardware-setup.svg">
 </picture>
 
 - The Debug Probe gives SWD debugging (breakpoints, step through) and a UART serial link to the Pico without soldering.
@@ -77,8 +76,8 @@ Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model 
 ## 6. Where to start: Phase 0 and Phase 1 step by step
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/first-steps-dark.svg">
-  <img alt="Phase 0 and Phase 1 step by step. 1: toolchain (Pico SDK, arm-none-eabi-gcc, picotool, OpenOCD). 2: blink and UART hello on the Pico 2 via the Debug Probe. 3: reproduce BitNetMCU, training ternary MNIST on the PC. 4: plain-C reference inference on the Pico 2 (packed weights). 5: CMSIS-NN int8 baseline, same task. 6: test harness, a PC script comparing board and PyTorch. Gate 0: board output equals PyTorch and baseline numbers logged? 7: compiler v0, model to C per layer. 8: idea A, three builds (all-code, all-data, hybrid). Gate 1: beats CMSIS-NN at equal accuracy?" src="docs/diagrams/first-steps.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="../diagrams/first-steps-dark.svg">
+  <img alt="Phase 0 and Phase 1 step by step. 1: toolchain (Pico SDK, arm-none-eabi-gcc, picotool, OpenOCD). 2: blink and UART hello on the Pico 2 via the Debug Probe. 3: reproduce BitNetMCU, training ternary MNIST on the PC. 4: plain-C reference inference on the Pico 2 (packed weights). 5: CMSIS-NN int8 baseline, same task. 6: test harness, a PC script comparing board and PyTorch. Gate 0: board output equals PyTorch and baseline numbers logged? 7: compiler v0, model to C per layer. 8: idea A, three builds (all-code, all-data, hybrid). Gate 1: beats CMSIS-NN at equal accuracy?" src="../diagrams/first-steps.svg">
 </picture>
 
 1. **Toolchain.** Install the Pico SDK, `arm-none-eabi-gcc`, CMake, `picotool` and the Raspberry Pi fork of OpenOCD. The VS Code "Raspberry Pi Pico" extension installs all of these at once. Build with `PICO_BOARD=pico2`. Debug with `openocd -f interface/cmsis-dap.cfg -f target/rp2350.cfg`.
@@ -104,8 +103,8 @@ Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model 
 ## 7. After Phase 1: idea test order
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/idea-order-dark.svg">
-  <img alt="Idea test order after Phase 1: A (code vs data split), then C (DMA streaming), then B (tree-routed neurons, the most novel). B leads to D (early exit), H (prompt batching) and G (SRAM cache over flash). D leads to F (split layers across 3 Picos). G and H lead to the larger-than-memory goal on a Pi 4 with a USB SSD. E (lookup-table maths) only if time." src="docs/diagrams/idea-order.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="../diagrams/idea-order-dark.svg">
+  <img alt="Idea test order after Phase 1: A (code vs data split), then C (DMA streaming), then B (tree-routed neurons, the most novel). B leads to D (early exit), H (prompt batching) and G (SRAM cache over flash). D leads to F (split layers across 3 Picos). G and H lead to the larger-than-memory goal on a Pi 4 with a USB SSD. E (lookup-table maths) only if time." src="../diagrams/idea-order.svg">
 </picture>
 
 | Idea | One-line test | Keep if (starting target) |
@@ -128,14 +127,7 @@ Run small AI models **bare-metal** on cheap boards: no OS, no runtime, no model 
 - **Bare metal on the Pi is a big job:** InferPi had to write its own USB, PCIe and FAT32 drivers. Run the Pi experiments under Linux first.
 - **The Pi 4 SSD tops out around 300–360 MB/s** whatever drive you use, because every Pi 4 M.2 board is USB underneath. A Pi 5 with the M.2 HAT+ (up to about 800–900 MB/s in Gen 3 mode) is the real upgrade, and only worth it if the link proves to be the limit.
 
-## 9. Open questions for the next session
-
-1. ~~Which Raspberry Pi do you already own?~~ **Answered:** a Pi 4. Still open: how much RAM it has, and whether you have a microSD card and power supply for it.
-2. ~~Has the shopping list been ordered?~~ **Answered:** no. One Pico 2, a data cable and the power meter are on hand, which is enough up to Gate 0. The Debug Probe and the extra Picos can wait.
-3. ~~Where should the code live?~~ **Answered:** in this repo, `Projects/model-as-firmware`.
-4. ~~Which language model to use for Phase 3: Atome LM's model, or a TinyStories-sized ternary model trained from scratch?~~ **Answered (13 Nov):** our own, MafLM (dense and tree twins), with Atome as an outside reference point only (`notes/lm.md`).
-
-## 10. Suggested code repo layout
+## 9. Suggested code repo layout (as planned; the real layout is close)
 
 ```
 model-as-firmware/
@@ -150,13 +142,9 @@ model-as-firmware/
 └── results/          # one CSV per experiment, same metric columns
 ```
 
-## 11. Prompt to paste into the new session
-
-> I'm starting work on my "Model as Firmware" project. Read `model-as-firmware/HANDOFF.md` in my a private repo repo first, then FEASIBILITY-STUDY.md. Answers to the open questions: [Pi model], [ordered yes/no], [code repo choice]. Let's begin at Phase 0 step [N]. Keep it honest, measure everything against the CMSIS-NN baseline, and draw diagrams for anything with moving parts.
-
 ## Key links
 
-- Docs: [Feasibility study](FEASIBILITY-STUDY.md) · [Shopping list](SHOPPING-LIST.md)
+- Docs: [Feasibility study](../../FEASIBILITY-STUDY.md) · [Hardware](../HARDWARE.md)
 - Baselines: [BitNetMCU](https://github.com/cpldcpu/BitNetMCU) · [Atome LM](https://github.com/TilelliLab/atome-lm) · [CMSIS-NN](https://github.com/ARM-software/CMSIS-NN) · [ESP32-S3 LLM Cluster](https://github.com/Low-Zi-Hong/ESP32s3-LLM-Cluster) · [InferPi](https://github.com/siddharthjthapa/InferPi)
 - Techniques: [UltraFastBERT / FFF](https://arxiv.org/abs/2311.10770) · [CALM early exit](https://proceedings.neurips.cc/paper_files/paper/2022/hash/6fac9e316a4ae75ea244ddcef1982c71-Abstract.html) · [Sherry N:M ternary](https://arxiv.org/pdf/2601.07892) · [WiCi InferSSD](https://wici.ai/article/running-800b-models-with-inferssd)
 - FPGA later: [hls4ml](https://fastmachinelearning.org/hls4ml/) · [FINN](https://xilinx.github.io/finn)

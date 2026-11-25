@@ -56,5 +56,5 @@ All these integer codes fit in int8, which matters for the CMSIS-NN baseline.
 
 - `BitNetMCU_inference.c`: the reference C kernels (fc 1/2/4/8-bit, ternary, conv3x3, maxpool).
 - `BitNetMCU_MNIST_test.c` / `BitNetMCU_MNIST_dll.c`: CNN inference driver (channel loop) and a DLL wrapper for Python.
-- `test_inference.py`: compares the DLL against the Python quantized model. It needs a 64-bit DLL, and the MinGW gcc on this PC is 32-bit, which is why we use an exe + binary file instead.
+- `test_inference.py`: compares the DLL against the Python quantized model. It needs a 64-bit DLL, and the MinGW gcc used here is 32-bit, which is why we use an exe + binary file instead.
 - `verify_int_inference.py`: exact integer emulation for the newer table/ShiftNorm FC models (`act_pow2=True`). It doesn't cover our CNN config.

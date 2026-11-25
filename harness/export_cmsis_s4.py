@@ -1,6 +1,6 @@
 """Write the CMSIS-NN header for the s4 variant: same model, fc1 weights packed as CMSIS-NN s4.
 
-    train/.venv/Scripts/python.exe harness/export_cmsis_s4.py --model tern80
+    python harness/export_cmsis_s4.py --model tern80
 
 Reads firmware/baselines/cmsis_nn/model_s8_<model>.h (written by export_cmsis.py) and writes model_s4fc1_<model>.h
 next to it: everything copied unchanged, except that s8_fc1_w is replaced by s4_fc1_w, packed two weights per byte,

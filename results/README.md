@@ -19,7 +19,7 @@
   - Rows marked "linear in SRAM" / "fc1 in SRAM" keep those layers as code in SRAM (98–134 KB of RAM), while CMSIS-NN's flash build reads everything from flash (34–38 KB of RAM).
 - The like-for-like figure is one core against one core, both from SRAM: **4.72x** (3.08 vs 14.52 ms, the best-of build of 25 Nov; 4.08x before it).
 - The CMSIS-NN ratios here use its int8 build. With its 4-bit kernel for fc1 (`cmsis_nn_s4fc1*` rows in `phase0.csv`, FINDINGS F27), CMSIS-NN is 7% faster from flash (17.41 ms) and 3% slower from SRAM. So the flash ratios here are about 7% too high, and the SRAM ratios stand.
-- Our fastest builds use more flash than CMSIS-NN (156–161 KB vs 94 KB).
+- Our fastest builds use more flash than CMSIS-NN (133–137 KB since the F28 best-of builds, 156–161 KB before, against 94 KB).
 - Run-to-run spread on repeated builds: ≤0.2% from SRAM, up to 1.2% from flash.
 
 ## Columns (`phase0.csv`)
