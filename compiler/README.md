@@ -23,8 +23,8 @@ train/export/<model>.h ──front end──► IR (integer ops + integer weight
 ```bash
 train/.venv/Scripts/python.exe compiler/compile.py --model tern80     # -> firmware/rp2350/mafc/gen/mafc_tern80.c (+ .ir.json)
 harness/measure.sh final results/phase1.csv mafc:tern80:flash mafc:tern80:ram
-train/.venv/Scripts/python.exe compiler/compile.py --model tern80 --cores 2 --simd --ternary code --int4 code   # current best
-harness/measure.sh final results/phase1.csv mafc2_s:tern80:ram:code:code
+train/.venv/Scripts/python.exe compiler/compile.py --model tern80 --cores 2 --simd --ternary code --int4 dense --fuse-pool --row-pairs   # current best (F28)
+harness/measure.sh final results/phase1.csv mafc2_s:tern80:ram:code:dense:data:nostream:plain:fpoolrp
 ```
 
 The generated C is committed, so building the firmware doesn't need Python. Regenerate it after changing the compiler or a model.
@@ -107,3 +107,9 @@ In two-core builds the SMLAD conv kernel is `noinline`, so both cores run one co
 - Front end: the BitNetMCU CNNMNIST header layout only. A QONNX or `.pth` front end comes later.
 - Back end: 1x16x16 int8 input, a per-channel conv prefix, and a `linear -> 10` + `argmax` end. These match the harness protocol.
 - SIMD covers the convs, the dense linear format and the tree routing. Weights as code (idea A) covers the linear layers (ternary and int4); conv weights are still data. See `notes/compiler.md`.
+
+## Fused pools and conv1 row pairs (`--fuse-pool`, `--row-pairs`)
+
+- `--fuse-pool` (needs `--simd`): each SMLAD conv followed by a 2x2 max pool runs as one kernel. The conv plane is never stored; the max is taken before `USAT(v >> sh)`, which is exact because that function is monotone. File suffix `_fpool`, CMake `-DFUSE_POOL=ON`.
+- `--row-pairs`: conv1 computes two output rows per step, so the middle input rows are loaded once for both. File suffix `_rp`, CMake `-DROW_PAIRS=ON`.
+- In `measure.sh` both go in the 9th field: `fpool` or `fpoolrp`. Numbers: FINDINGS F28.

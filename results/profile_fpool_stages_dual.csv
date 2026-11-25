@@ -1,0 +1,6 @@
+date,build,model,conv1,dw1+pool1,dw2+pool2,join,fc1,fc2,fc3
+2026-11-25 12:19,mafc_v1_dual_simd_code_i4code_fpool_ram_prof,tern80,127875,81529,10939,30,27818,9664,2853
+2026-11-25 12:20,mafc_v1_dual_simd_code_i4dense_fpool_ram_prof,tern80,128542,81571,11014,29,27538,9482,3080
+2026-11-25 12:23,mafc_v1_dual_simd_code_i4dense_fpool_ram_prof,tern80,125571,85118,10668,29,27538,9482,3080
+2026-11-25 12:25,mafc_v1_dual_simd_code_i4dense_fpool_rp_ram_prof,tern80,118881,81303,11113,29,27538,9675,3096
+2026-11-25 12:26,mafc_v1_dual_simd_code_i4dense_fpool_rp_ram_prof,tern80,118881,81303,11113,29,27538,9675,3096

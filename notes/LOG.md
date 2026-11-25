@@ -3,7 +3,7 @@
 Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at the end. Numbers are on the full 10k MNIST test set unless stated otherwise. Raw results are in [results/](../results/).
 
 **How to read the numbers (added 14 Nov 2026, fairness review):**
-- Unless an entry says otherwise, every "Nx faster than CMSIS-NN" for a two-core build compares our two cores with CMSIS-NN's one. The like-for-like figure is one core against one: 4.08x, both from SRAM (FINDINGS F17, F18, Gate 1).
+- Unless an entry says otherwise, every "Nx faster than CMSIS-NN" for a two-core build compares our two cores with CMSIS-NN's one. The like-for-like figure is one core against one: 4.08x, both from SRAM (FINDINGS F17, F18, Gate 1); 4.72x from 25 Nov (F28).
 - Flash-build ratios compare our builds, which keep the linear layers as code in SRAM, with CMSIS-NN entirely in flash.
 - CMSIS-NN ran int8 only until 14 Nov. Its 4-bit kernel for fc1 (F27) makes its flash build 7% faster, so earlier flash ratios are about 7% too high. The SRAM bar stands.
 - "Best" accuracies are the best epoch picked on the test set, which is optimistic. The "final" numbers are the fair ones.
@@ -271,3 +271,11 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
   - Idea B on the story model meets its 3x target for the tree layers (7.8x fewer FFN weights read, FFN 5.4x faster). Over the whole token it reads 2.7x fewer flash bytes (82 vs 223 KB).
   - New number: 40% of the story model's 0.89M ternary weights are zero (dense 39.8%, tree 40.8%, from `train/runs/lm_*.npz`). All of its ~530K non-zero weights as code would take about 3 MB, six times the SRAM. The story model keeps its weights as data by design; code for its small matrices was not tried.
   - Phase 4 is the user's decision. Recommended first: energy with an INA226, then optionally a model larger than SRAM on the Pico 2 (ideas C and G).
+
+## 25 Nov 2026: best-of build (F28)
+
+- Question: did any build combine every learning? No: the 1.99 ms build predates the two conv-stack fixes from "Open questions" and the 4-row dense kernel.
+- Built them: `--fuse-pool` (dw1 + pool1 and dw2 + pool2 as one kernel each; max before ReLU + shift, exact) and `--row-pairs` (conv1 two output rows per step, sharing the middle input rows); fc2/fc3 dense.
+- Two cores from SRAM: **1.99 → 1.67 ms**; one core **3.56 → 3.08 ms = 4.72x CMSIS-NN like for like**; two cores from flash 2.27 → 1.99 ms; tree (fff80) 1.86 → 1.53 ms. All bit-exact on 10k images, PC and board.
+- Dropped: forced `LDRD` (net slower), a hand-interleaved fused kernel (gcc already shares the loads, same cycles), skipping uniform background patches (images are normalised per image; only 9% uniform).
+- conv1 is now 47% of the two-core time.

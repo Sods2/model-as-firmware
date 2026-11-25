@@ -203,6 +203,106 @@ def emit_conv_ch_smlad(node, out_ctype, ch=None, kwords=None, shared=False):
 '''
 
 
+def emit_conv_pool_ch_smlad(node, pool, out_ctype, shared=False):
+    """One channel of a 3x3 conv on an int16 plane fused with the 2x2 max pool that follows it (--fuse-pool).
+    Each step computes the 2x2 block of conv sums under one pooled output, two at a time with the same SMLAD
+    rows as emit_conv_ch_smlad (row y, then row y+1), keeps their maximum, and applies ReLU + shift once.
+    Exact: v -> USAT(v >> sh) is monotone non-decreasing, so max over the block of USAT(s >> sh) equals
+    USAT(max(s) >> sh). The conv output plane is never stored, and the pool pass disappears."""
+    n = node.in_shape[1]
+    m = n - 2
+    mp = m // 2
+    sh = node.attrs['shift']
+    assert n % 2 == 0 and m % 2 == 0 and pool.in_shape[1] == m
+    def rows(base):
+        out = []
+        for r in range(3):
+            s0 = f'SMUAD(p, a{r})' if r == 0 else f'SMLAD(p, a{r}, s0)'
+            s1 = f'SMUAD(q, b{r})' if r == 0 else f'SMLAD(q, b{r}, s1)'
+            out.append(f'''            {{
+                uint32_t p, q;
+                memcpy(&p, r + {base + r * n}, 4);
+                memcpy(&q, r + {base + r * n} + 2, 4);
+                s0 = {s0};
+                s0 = SMLABT(q, b{r}, s0);
+                s1 = {s1};
+                s1 = SMLATB(p, a{r}, s1);
+            }}''')
+        return '\n'.join(out)
+    bits = 15 if out_ctype == 'int16_t' else 31
+    qual = '__attribute__((noinline)) static void' if shared else 'static inline void'
+    steps = f'''{rows(0)}
+            mx = s0 > s1 ? s0 : s1;
+{rows(n)}
+            s0 = s0 > s1 ? s0 : s1;
+            mx = mx > s0 ? mx : s0;'''
+    # Rows y and y+1 read input rows 1 and 2 at the same addresses; gcc already loads them once (no stores in
+    # between), so a hand-interleaved two-row version measured the same cycle count (notes/compiler.md, step 11).
+    return f'''// {node.name} + {pool.name}: conv3x3 ({node.attrs["mode"]}) fused with maxpool 2x2, one channel, int16 {n}x{n} -> {mp}x{mp}, ReLU, >> {sh}
+{qual} {node.name}_{pool.name}_ch(const int16_t *restrict in, const uint32_t *restrict kp, {out_ctype} *restrict out) {{
+    const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];
+    for (int y = 0; y < {mp}; y++) {{
+        const int16_t *row = in + y * {2 * n};
+        {out_ctype} *o = out + y * {mp};
+        #pragma GCC unroll 1
+        for (int x = 0; x < {mp}; x++) {{
+            const int16_t *r = row + 2 * x;
+            int32_t s0, s1, mx;
+{steps}
+            o[x] = ({out_ctype})USAT(mx >> {sh}, {bits});
+        }}
+    }}
+}}
+'''
+
+
+def emit_conv_ch_smlad_rows2(node, shared=False):
+    """emit_conv_ch_smlad with two output rows per step (--row-pairs): outputs (y, x..x+1) and (y+1, x..x+1).
+    Input rows y+1 and y+2 feed both output rows, so 4 row loads serve 4 outputs instead of 6. Order: input row 0
+    starts the top sums, row 1 adds to the top and starts the bottom, row 2 finishes and stores the top, row 3
+    finishes the bottom. int16 output only (stored as word pairs); needs an even output height."""
+    n = node.in_shape[1]
+    m = n - 2
+    sh = node.attrs['shift']
+    assert n % 2 == 0 and m % 2 == 0
+    def mac(t, kr, first):
+        a, b = f'a{kr}', f'b{kr}'
+        s0 = f'SMUAD(p, {a})' if first else f'SMLAD(p, {a}, {t}0)'
+        s1 = f'SMUAD(q, {b})' if first else f'SMLAD(q, {b}, {t}1)'
+        return [f'{t}0 = {s0};', f'{t}0 = SMLABT(q, {b}, {t}0);', f'{t}1 = {s1};', f'{t}1 = SMLATB(p, {a}, {t}1);']
+
+    def store(t, off):
+        return [f'{{ uint32_t w = (uint32_t)USAT({t}0 >> {sh}, 15) | ((uint32_t)USAT({t}1 >> {sh}, 15) << 16);',
+                f'  memcpy(o + {off}x, &w, 4); }}']
+    lines = []
+    for ir in range(4):
+        blk = ['uint32_t p, q;', f'memcpy(&p, row + {ir * n} + x, 4);', f'memcpy(&q, row + {ir * n} + x + 2, 4);']
+        if ir <= 2:
+            blk += mac('t', ir, ir == 0)
+        if ir >= 1:
+            blk += mac('u', ir - 1, ir == 1)
+        if ir == 2:
+            blk += store('t', '')
+        if ir == 3:
+            blk += store('u', f'{m} + ')
+        lines += ['            {'] + ['                ' + l for l in blk] + ['            }']
+    body = '\n'.join(lines) + '\n'
+    qual = '__attribute__((noinline)) static void' if shared else 'static inline void'
+    return f'''// {node.name}: conv3x3 ({node.attrs["mode"]}), one channel, int16 {n}x{n} -> {m}x{m}, ReLU, >> {sh}; SMLAD, 2 rows x 2 outputs per step
+{qual} {node.name}_ch(const int16_t *restrict in, const uint32_t *restrict kp, int16_t *restrict out) {{
+    const uint32_t a0 = kp[0], a1 = kp[1], a2 = kp[2], b0 = kp[3], b1 = kp[4], b2 = kp[5];
+    for (int y = 0; y < {m}; y += 2) {{
+        const int16_t *row = in + y * {n};
+        int16_t *o = out + y * {m};
+        #pragma GCC unroll 1
+        for (int x = 0; x < {m}; x += 2) {{
+            int32_t t0, t1, u0, u1;
+{body}        }}
+    }}
+}}
+'''
+
+
 IMG16_DECL = '''static int16_t img16[REF_IMG_PIXELS] __attribute__((aligned(4)));   // the image widened to int16, read by conv1's SMLAD kernel
 '''
 
@@ -681,7 +781,7 @@ CONV_FORMATS = ('data', 'code')
 
 
 def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False,
-             int8='plain'):
+             int8='plain', fuse_pool=False, row_pairs=False):
     """cores=2: the channel-fused conv segment and the big linear layers are split across both M33 cores.
     Core 1 runs a job loop fed by the SIO FIFO; on the PC build the core-1 jobs simply run inline first."""
     assert cores in (1, 2)
@@ -708,10 +808,6 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
                     {'ternary': ternary, 'int4sym': int4, 'int8': int8}.get(nd.attrs['quant']) == 'dense'}
         assert streamed, '--stream needs a dense-format layer (--ternary/--int4/--int8 dense)'
         par_linear -= streamed
-    stage_names = [nodes[i].name for i in seg] + (['join'] if cores == 2 else []) + \
-                  [nd.name for nd in rest if nd.op in ('linear', 'fff')]
-    stage_id = {n: k for k, n in enumerate(stage_names)}
-
     # Typed plan for the fused segment. With simd, a tensor is stored as int16 when bounds.py proves it
     # fits, and a depthwise conv reading an int16 plane uses the SMLAD kernel. The last op writes feat (int32).
     bd = bounds(graph) if simd else {}
@@ -734,13 +830,40 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
             kern = 'smlad'
         plan.append((nd, in_t, out_t, kern))
         in_t = out_t
+    # --fuse-pool: an SMLAD conv followed by a 2x2 max pool becomes one kernel (emit_conv_pool_ch_smlad); the
+    # merged entry takes the pool's output type, and the pool node is remembered in fused_pool
+    fused_pool = {}
+    if fuse_pool:
+        assert simd and conv == 'data', '--fuse-pool fuses the SMLAD conv kernel with data weights: needs --simd, --conv data'
+        merged = []
+        for e in plan:
+            if merged and e[0].op == 'maxpool2' and merged[-1][3] == 'smlad':
+                cn, cit, _, _ = merged.pop()
+                fused_pool[cn.name] = e[0]
+                merged.append((cn, cit, e[2], 'smlad_pool'))
+            else:
+                merged.append(e)
+        assert fused_pool, '--fuse-pool: no SMLAD conv followed by a max pool'
+        plan = merged
+
+    def sname(nd):
+        return f'{nd.name}+{fused_pool[nd.name].name}' if nd.name in fused_pool else nd.name
+    stage_names = [sname(nd) for nd, _, _, _ in plan] + (['join'] if cores == 2 else []) + \
+                  [nd.name for nd in rest if nd.op in ('linear', 'fff')]
+    stage_id = {n: k for k, n in enumerate(stage_names)}
     uses16 = any(o == 'int16_t' for _, _, o, _ in plan)
     img16 = plan[0][3] == 'smlad'       # conv1 reads a widened int16 copy of the image
 
     weights, funcs = [], []
     for nd, it, ot, kern in plan:
         if nd.op == 'conv3x3':
-            if kern == 'smlad':
+            if kern == 'smlad_pool':
+                weights.append(c_array('uint32_t', f'{nd.name}_kp', pack_smlad_kernel(nd.weights), '0x{:08X}', 6))
+                funcs.append(emit_conv_pool_ch_smlad(nd, fused_pool[nd.name], ot, shared=cores == 2))
+            elif kern == 'smlad' and row_pairs and ot == 'int16_t' and nd.attrs['mode'] == 'broadcast':
+                weights.append(c_array('uint32_t', f'{nd.name}_kp', pack_smlad_kernel(nd.weights), '0x{:08X}', 6))
+                funcs.append(emit_conv_ch_smlad_rows2(nd, shared=cores == 2))
+            elif kern == 'smlad':
                 kp = pack_smlad_kernel(nd.weights)
                 if conv == 'code':
                     # weights as code: one specialised function per channel, called through a table
@@ -798,7 +921,9 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
             else:
                 dst = next(b for b in pools[ot] if b != cur)
                 used_dst.add(dst)
-            if nd.op == 'conv3x3' and kern == 'smlad':
+            if kern == 'smlad_pool':
+                out.append(f'{indent}    {nd.name}_{fused_pool[nd.name].name}_ch({cur}, {nd.name}_kp + 6 * c, {dst});')
+            elif nd.op == 'conv3x3' and kern == 'smlad':
                 if conv == 'code':
                     out.append(f'{indent}    {nd.name}_tab[c]({cur}, {dst});')
                 else:
@@ -808,7 +933,7 @@ def generate(graph, source='', cores=1, simd=False, ternary='base3', int4='packe
             else:
                 out.append(f'{indent}    {nd.name}_ch({cur}, {dst});')
             if prof:
-                out.append(f'{indent}    PROF_STAGE({stage_id[nd.name]});')
+                out.append(f'{indent}    PROF_STAGE({stage_id[sname(nd)]});')
             cur = dst
         out.append(f'{indent}}}')
         return out
@@ -903,10 +1028,10 @@ static inline void join_job(void) {{}}
     ]
 
     variant = ('v0 (one core' if cores == 1 else 'v1 (two cores') + (', SMLAD on int16 planes' if simd else '') + \
-              (f', ternary as {ternary}' if ternary != 'base3' else '') + (f', int4 as {int4}' if int4 != 'packed' else '') + (', conv weights as code' if conv == 'code' else '') + (', dense layers streamed from flash' if stream else '') + (f', int8 layers {int8}' if int8 != 'plain' else '')
+              (f', ternary as {ternary}' if ternary != 'base3' else '') + (f', int4 as {int4}' if int4 != 'packed' else '') + (', conv weights as code' if conv == 'code' else '') + (', dense layers streamed from flash' if stream else '') + (f', int8 layers {int8}' if int8 != 'plain' else '') + (', conv + max pool fused' if fuse_pool else '') + (', conv1 two rows per step' if row_pairs else '')
     names = ', '.join(f'"{n}"' for n in stage_names)
     regen = f'compiler/compile.py --model {graph.name}' + (' --cores 2' if cores == 2 else '') + (' --simd' if simd else '') + \
-            (f' --ternary {ternary}' if ternary != 'base3' else '') + (f' --int4 {int4}' if int4 != 'packed' else '') + (' --conv code' if conv == 'code' else '') + (' --stream' if stream else '') + (f' --int8 {int8}' if int8 != 'plain' else '')
+            (f' --ternary {ternary}' if ternary != 'base3' else '') + (f' --int4 {int4}' if int4 != 'packed' else '') + (' --conv code' if conv == 'code' else '') + (' --stream' if stream else '') + (f' --int8 {int8}' if int8 != 'plain' else '') + (' --fuse-pool' if fuse_pool else '') + (' --row-pairs' if row_pairs else '')
     desc = '\n'.join('//   ' + l for l in graph.describe().splitlines())
     head = f'''// Generated by mafc {__version__} (compiler/), back end rp2350_c {variant}, all weights as packed data).
 // Source: {source}
@@ -943,7 +1068,7 @@ static int8_t act[{tail_max}];
             head = head.replace(decl_old, new)
             dual = dual.replace(decl_old, new)
         bnote = '\n'.join(f'//   {nd.name}: values in [{bd[nd.name][0]}, {bd[nd.name][1]}], |partial sums| <= {bd[nd.name][2]}'
-                          f' -> {ot}{" (SMLAD)" if kern == "smlad" else ""}' for nd, it, ot, kern in plan)
+                          f' -> {ot}{" (SMLAD)" if kern == "smlad" else ""}{f" (SMLAD, fused with {fused_pool[nd.name].name}: conv plane never stored)" if kern == "smlad_pool" else ""}' for nd, it, ot, kern in plan)
         head = head.replace('// ---- weights ----', '// ---- proven value ranges (compiler/mafc/bounds.py) ----\n' + bnote +
                             '\n' + SIMD_HELPERS + (WIDEN_IMG if img16 else '') + '\n// ---- weights ----')
     return (head + ''.join(weights) + '\n// ---- layers ----\n' + '\n'.join(funcs) + dual +
@@ -952,13 +1077,13 @@ static int8_t act[{tail_max}];
 
 
 def write(graph, out_dir, source='', cores=1, simd=False, ternary='base3', int4='packed', conv='data', stream=False,
-          int8='plain'):
+          int8='plain', fuse_pool=False, row_pairs=False):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     c_path = out_dir / (f'mafc_{graph.name}' + ('_dual' if cores == 2 else '') + ('_simd' if simd else '') +
                         (f'_{ternary}' if ternary != 'base3' else '') + (f'_i4{int4}' if int4 != 'packed' else '') +
                         (f'_i8{int8}' if int8 != 'plain' else '') +
-                        ('_cvcode' if conv == 'code' else '') + ('_stream' if stream else '') + '.c')
-    c_path.write_text(generate(graph, source, cores, simd, ternary, int4, conv, stream, int8), encoding='utf-8', newline='\n')
+                        ('_cvcode' if conv == 'code' else '') + ('_stream' if stream else '') + ('_fpool' if fuse_pool else '') + ('_rp' if row_pairs else '') + '.c')
+    c_path.write_text(generate(graph, source, cores, simd, ternary, int4, conv, stream, int8, fuse_pool, row_pairs), encoding='utf-8', newline='\n')
     (out_dir / f'mafc_{graph.name}.ir.json').write_text(graph.to_json(), encoding='utf-8', newline='\n')
     return c_path

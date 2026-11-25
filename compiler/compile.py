@@ -37,6 +37,10 @@ def main():
                          'per channel, weights as immediates; needs --simd)')
     ap.add_argument('--stream', action='store_true',
                     help='layers in a dense format stream their weights from flash by DMA (idea C, flash builds)')
+    ap.add_argument('--fuse-pool', action='store_true',
+                    help='fuse each SMLAD conv with the 2x2 max pool after it: the conv plane is never stored (needs --simd)')
+    ap.add_argument('--row-pairs', action='store_true',
+                    help='conv1 (broadcast SMLAD conv) computes two output rows per step, sharing the middle input rows')
     ap.add_argument('--check', type=int, default=1000, help='test images to check IR vs golden (0 = skip)')
     args = ap.parse_args()
 
@@ -57,7 +61,7 @@ def main():
         print(f'IR interpreter == golden on {args.check} images: {ok}')
         if not ok:
             sys.exit(1)
-    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd, ternary=args.ternary, int4=args.int4, conv=args.conv, stream=args.stream, int8=args.int8)
+    path = backend_rp2350_c.write(graph, args.out, source=str(header.relative_to(ROOT)).replace('\\', '/'), cores=args.cores, simd=args.simd, ternary=args.ternary, int4=args.int4, conv=args.conv, stream=args.stream, int8=args.int8, fuse_pool=args.fuse_pool, row_pairs=args.row_pairs)
     print(f'wrote {path.relative_to(ROOT)}')
 
 

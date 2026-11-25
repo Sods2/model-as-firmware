@@ -57,9 +57,9 @@ One inference: conv1 → dw1 → pool1 → dw2 → pool2 (run per channel, split
 *As of 14 Nov 2026.* Phases 0, 1 and 3 are done on the Pico 2. **Gate 3 verdict** ([FINDINGS, "Gate 3"](notes/FINDINGS.md)): feasible as a proof of concept for speed on models that fit the Pico 2's SRAM; weights as code are shown on MNIST only, and there is no strong language-model baseline. Energy is not measured yet (see the bullets below). Every timed build matches its golden model bit for bit. All numbers come from one board, one training run per model, and the sources named. Unequal conditions are stated next to each number.
 
 **Phase 1 (MNIST, against CMSIS-NN): Gate 1 met, with a stated scope ([FINDINGS F17](notes/FINDINGS.md)).**
-- **Like for like (one core each, both from SRAM, 99.47% vs 99.44% accuracy):** the compiler's build runs in **3.56 ms against CMSIS-NN's 14.52 ms, 4.1x faster**.
-- **Two cores:** 1.99 ms. That is 7.3x CMSIS-NN, but CMSIS-NN runs on one core; against a perfectly parallel two-core CMSIS-NN it would be at least 3.6x.
-- **Memory:** that fast build uses 156 KB of flash and 161 KB of SRAM, against CMSIS-NN's 94 KB and 127 KB. Compiling weights into code costs space.
+- **Like for like (one core each, both from SRAM, 99.47% vs 99.44% accuracy):** the compiler's best-of build runs in **3.08 ms against CMSIS-NN's 14.52 ms, 4.7x faster** (F28, 25 Nov; 3.56 ms and 4.1x at the Gate 3 verdict).
+- **Two cores:** 1.67 ms. That is 8.7x CMSIS-NN, but CMSIS-NN runs on one core; against a perfectly parallel two-core CMSIS-NN it would be at least 4.4x.
+- **Memory:** the one-core build uses 137 KB of flash and 140 KB of SRAM, against CMSIS-NN's 94 KB and 127 KB. Compiling weights into code costs space.
 - **Much of the MNIST lead comes from CMSIS-NN handling this model's shape badly** (a one-input-channel first conv and depthwise convs; F5).
 - **On a wide conv, the shape CMSIS-NN is built for:** one synthetic layer with random ternary weights. Ternary-as-code breaks even at about 14% zero weights, wins 1.19x at 33% and 9x at 90%, and loses (0.86x) when no weights are zero (F17).
 - **On an all-int8 version of the model:** level with CMSIS-NN on the linear layers, and 3.9x faster on one core overall, all of it from the conv stack (F24).

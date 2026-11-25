@@ -92,3 +92,12 @@ date,build,model,target,n_images,accuracy_pct,golden_match_pct,pytorch_agree_pct
 2026-11-13 00:53,mafc_v1_dual_simd_code_i4code_ram,tern80,pico,10000,99.47,100.0,99.98,1.994,299109,298014,299724,150,156.68,161.42,0.0,,idea B: tree (fff80) vs dense twin (tern80)
 2026-11-13 00:55,mafc_v1_dual_simd_code_i4dense,fff80,pico,10000,99.15,100.0,99.88,2.574,386092,369171,470585,150,118.52,80.02,6.28,,idea B: tree (fff80) vs dense twin (tern80)
 2026-11-13 00:57,mafc_v1_dual_simd_code_i4code,tern80,pico,10000,99.47,100.0,99.98,2.278,341669,339114,434260,150,156.82,129.19,1.31,,idea B: tree (fff80) vs dense twin (tern80)
+2026-11-25 12:28,mafc_v1_dual_simd_code_i4dense_fpool_rp_ram,tern80,pico,10000,99.47,100.0,99.98,1.67,250500,250275,251881,150,133.27,136.79,0.0,,"best-of: conv+pool fused, conv1 row pairs, 4-row dense int4"
+2026-11-25 12:30,mafc_v0_simd_code_i4dense_fpool_rp_ram,tern80,pico,10000,99.47,100.0,99.98,3.076,461330,461169,461689,150,137.03,139.78,0.0,,"best-of: conv+pool fused, conv1 row pairs, 4-row dense int4"
+2026-11-25 12:32,mafc_v1_dual_simd_code_i4dense_fpool_rp,tern80,pico,10000,99.47,100.0,99.98,2.601,390165,376717,512149,150,133.39,96.23,8.39,,"best-of: conv+pool fused, conv1 row pairs, 4-row dense int4"
+2026-11-25 12:34,mafc_v0_simd_code_i4dense_fpool_rp,tern80,pico,10000,99.47,100.0,99.98,3.684,552639,546139,664699,150,137.15,101.02,7.24,,"best-of: conv+pool fused, conv1 row pairs, 4-row dense int4"
+2026-11-25 12:35,mafc_v1_dual_simd_code_i4dense_fpool_rp_ram,fff80,pico,10000,99.15,100.0,99.88,1.53,229459,227938,231232,150,118.78,122.82,0.0,,"best-of: conv+pool fused, conv1 row pairs, 4-row dense int4"
+2026-11-25 12:37,mafc_v0_simd_code_i4dense_fpool_rp_ram,fff80,pico,10000,99.15,100.0,99.88,2.767,415047,414018,416876,150,117.19,120.46,0.0,,"best-of: conv+pool fused, conv1 row pairs, 4-row dense int4"
+2026-11-25 12:40,mafc_v1_dual_simd_code_i4code_fpool_rp,tern80,pico,10000,99.47,100.0,99.98,1.991,298710,291243,398088,150,157.15,127.66,1.52,,"best-of: conv+pool fused, conv1 row pairs, int4 as code"
+2026-11-25 12:42,mafc_v0_simd_code_i4code_fpool_rp,tern80,pico,10000,99.47,100.0,99.98,3.136,470344,467409,550304,150,161.46,132.81,1.18,,"best-of: conv+pool fused, conv1 row pairs, int4 as code"
+2026-11-25 12:44,mafc_v1_dual_simd_code_i4code_fpool_rp_ram,tern80,pico,10000,99.47,100.0,99.98,1.666,249835,249565,250435,150,157.01,160.21,0.0,,"best-of: conv+pool fused, conv1 row pairs, int4 as code"

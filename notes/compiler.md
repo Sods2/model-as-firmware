@@ -245,6 +245,16 @@ fc1 dense from flash: 308k → 219k cycles (one core), and 526k → 219k against
 - File names, flags and `measure.sh` specs are unchanged: the model name (`fff80`) selects the tree.
 - Results (FINDINGS F25): the tree stage takes 17.5k cycles (code) and 22.3k (dense) from SRAM, against 67.2k / 94.2k for the twin's fc1 + fc2; 103k against 645k from flash.
 
+### v1 step 11: best-of build: conv + pool fused, conv1 row pairs (`--fuse-pool`, `--row-pairs`, 25 Nov 2026)
+
+- **`--fuse-pool`** (needs `--simd`, `--conv data`): every SMLAD conv followed by a 2x2 max pool becomes one kernel, `emit_conv_pool_ch_smlad`. Each step computes the 2x2 block of conv sums under one pooled output (row y, then row y+1, two outputs each, the same SMLAD rows as the plain kernel), keeps the maximum, and applies `USAT(mx >> sh)` once. Exact: `v -> USAT(v >> sh)` is monotone, so it commutes with max. The plan merges the two entries; the merged stage is named `dw1+pool1` in profiles (`run.py` writes those to `*_fpool_stages*.csv`).
+- **`--row-pairs`**: conv1 (the broadcast conv, int16 out) uses `emit_conv_ch_smlad_rows2`, two output rows per step. Input rows y+1 and y+2 feed both, so 4 loads per 4 outputs instead of 6. The loop has 48 instructions and 6 spills per 4 outputs, and is still 7.5% faster (128.5k → 118.9k cycles, two cores).
+- File suffixes `_fpool`, `_rp`; CMake `-DFUSE_POOL=ON`, `-DROW_PAIRS=ON`; `measure.sh` 9th field `fpool` / `fpoolrp`.
+- **Tried and dropped:**
+  - `LDRD` for each row's two words: gcc splits an 8-byte `memcpy` back into two `LDR`s, so it was forced with inline asm. conv1 −2%, dw1 + pool1 +4%: load latency is not the limit.
+  - A hand-interleaved two-row fused kernel: identical cycle counts. gcc already loads the shared middle rows once.
+- Result (FINDINGS F28): 1.67 ms on two cores and 3.08 ms on one core from SRAM, bit-exact on 10k images on the board.
+
 ## Lessons
 
 - The worst-case bound analysis belongs in the compiler: it decides data types (int16 vs int32) and proves no overflow. The current interpreter only *asserts* int32 safety at run time.
