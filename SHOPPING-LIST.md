@@ -1,6 +1,6 @@
 # Model-as-Firmware: Shopping List
 
-*Nov 3, 2026 · also kept as a [Claude Doc]((private link removed))*
+*Nov 3, 2026*
 
 Everything needed for Phase 0-2 on the Pico 2, all plug-in with no soldering. Prices checked 3 Nov 2026; they change, so confirm at checkout.
 

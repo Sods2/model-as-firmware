@@ -181,7 +181,7 @@ Newest first up to 13 Nov; the Phase 3 entries (13 Nov evening onwards) are at t
 - `golden.py` gained `trace(img)` (every stage's output for one image) for both golden models. `logits()` is unchanged: still 2000/2000 bit-exact against the host build.
 - The bridge picks the model from the board's INFO line. A board flashed with `tern80z90` would otherwise be checked against `tern80` and fail every image.
 - Checked on the board with a `mafc_v0_prof` build (500 images): 9.43 ms mean, 100% golden match. That figure is from the live view, not a logged run.
-- Design mockups are on a private canvas: (private link removed). It covers live view, build comparison and states. The running page follows its "Live execution" board.
+- Design mockups (live view, build comparison and states) were drawn first; the running page follows the live-view mockup.
 
 ## 11 Nov 2026: Phase 0 steps 4–6 (Gate 0 correctness) while parts are in the post
 

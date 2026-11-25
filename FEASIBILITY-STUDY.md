@@ -1,6 +1,6 @@
 # Model-as-Firmware: Feasibility Study
 
-*Nov 3, 2026 · also kept as a [Claude Doc]((private link removed))*
+*Nov 3, 2026*
 
 > **Corrections from measurement (added 14 Nov 2026).** This study was written before any measurement and is kept as written. Where later results contradict it, they win:
 >
